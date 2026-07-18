@@ -1,0 +1,44 @@
+// codex.mjs — adapter for the Codex CLI (verified against codex-cli 0.144.5).
+//   headless invoke : codex exec [OPTIONS] -   (prompt read from stdin via the `-`)
+//   trust lever     : -s read-only | workspace-write | danger-full-access
+//   structured out  : --output-schema <FILE>   final message : -o/--output-last-message <FILE>
+//   NOTE: this version has NO `--full-auto` flag — `codex exec` is already non-interactive; the
+//   sandbox policy alone gates writes. Confirmed via `codex exec --help`.
+import { spawnSync } from 'node:child_process';
+import { locateExecutable } from '../which.mjs';
+
+export const id = 'codex';
+export const displayName = 'Codex';
+export const installHint = 'Install the Codex CLI (e.g. `brew install codex`) and run `codex login`.';
+
+export function locate() {
+  return locateExecutable('codex', ['/opt/homebrew/bin', '/usr/local/bin', '~/.codex/bin']);
+}
+
+export function authOk(bin) {
+  const r = spawnSync(bin, ['--version'], { encoding: 'utf8' });
+  if (r.status !== 0) return { ok: false, hint: 'codex is installed but not responding; run `codex login`.' };
+  return { ok: true, note: 'auth is verified by codex at exec time; a logged-out CLI surfaces as a run failure (never a fake clean).' };
+}
+
+function sandboxFor(verb, mode) {
+  if (mode === 'autonomous') return 'danger-full-access';
+  return verb === 'build' ? 'workspace-write' : 'read-only';
+}
+
+export function supportsResume() { return false; } // v1: use native `codex exec resume` directly
+
+export function invocation({ verb, cwd, model, mode, lastMsgFile, schemaFile }) {
+  const sandbox = sandboxFor(verb, mode);
+  const args = ['exec', '-s', sandbox, '-C', cwd, '--skip-git-repo-check'];
+  if (model) args.push('-m', model);
+  if (schemaFile) args.push('--output-schema', schemaFile);
+  if (lastMsgFile) args.push('-o', lastMsgFile);
+  args.push('-'); // read the prompt as literal bytes from stdin
+  return { bin: locate(), args, stdin: 'file', trustNote: `-s ${sandbox}` };
+}
+
+export function capture({ code, stdout, stderr, finalMessage }) {
+  const text = (finalMessage && finalMessage.trim()) ? finalMessage : (stdout || '');
+  return { ran: true, ok: code === 0, text: text.trim(), stderr: (stderr || '').trim() };
+}

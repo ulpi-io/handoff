@@ -1,0 +1,4 @@
+# Handoff briefs + run artifacts produced in a target repo (never committed with the plugin)
+.ulpi/
+node_modules/
+.DS_Store
