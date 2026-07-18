@@ -40,12 +40,12 @@ the driver owns everything reusable.
 
 ### Claude Code
 
-This plugin ships in the `ulpi-autonomous-engineering` marketplace:
+Install from the **ULPI marketplace** ([ulpi-io/marketplace](https://github.com/ulpi-io/marketplace)):
 
 ```
-/plugin marketplace update ulpi-autonomous-engineering   # or: /plugin marketplace add <this repo>
-/plugin install handoff@ulpi-autonomous-engineering
-/reload-plugins                                          # or start a new session — required after install
+/plugin marketplace add ulpi-io/marketplace
+/plugin install handoff@ulpi
+/reload-plugins                              # or start a new session — required after install
 ```
 
 Then invoke by the **plugin-namespaced** command, e.g. `/handoff:codex-review src/auth`, or just ask
@@ -54,10 +54,10 @@ Then invoke by the **plugin-namespaced** command, e.g. `/handoff:codex-review sr
 
 ### Codex
 
-The same repo is also a self-contained Codex plugin marketplace:
+From the same **ULPI marketplace**:
 
 ```
-codex plugin marketplace add ulpi-io/handoff   # or a local path to this repo
+codex plugin marketplace add ulpi-io/marketplace
 codex plugin add handoff@ulpi
 ```
 
@@ -73,7 +73,6 @@ Requires the target CLI installed and authed (`codex`, `grok`, `kiro-cli`, `clau
 ```
 .claude-plugin/plugin.json        name: handoff (Claude Code manifest)
 .codex-plugin/plugin.json         name: handoff (Codex manifest + interface block)
-.agents/plugins/marketplace.json  Codex marketplace listing handoff at path "." (self-contained)
 commands/<provider>-<verb>.md     12 thin slash-command shims (host-agnostic plugin-root)
 skills/handoff-run/SKILL.md       the ONE shared workflow (scope → brief → run → verify)
 scripts/handoff.mjs               the ONE driver (dispatch on --provider/--verb)
