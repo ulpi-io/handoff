@@ -127,7 +127,7 @@ export function pipelineInvocation({ bin, role, cwd, promptFile, model, effort, 
 
 export function pipelineRuntimeCheck({ stderr }) {
   const text = String(stderr || '');
-  if (/sandbox.{0,160}(failed|unable|unavailable|unsupported|not (applied|enforced)|continu(e|ing) without)/iu.test(text)) {
+  if (/sandbox.{0,160}(failed|unable|unavailable|unsupported|not (applied|enforced)|could not be applied|refusing to start|continu(e|ing) without)/iu.test(text)) {
     return { ok: false, reason: 'Grok reported that its requested sandbox was not enforced' };
   }
   return { ok: true, reason: null };

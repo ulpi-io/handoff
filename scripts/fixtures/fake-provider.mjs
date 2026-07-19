@@ -118,6 +118,9 @@ if (mode === 'unsafe-evidence-path') serialized = JSON.stringify({
 if (mode === 'stderr-secret') {
   process.stderr.write('api_key=super-secret-value Bearer abcdefghijklmnopqrstuvwxyz\n');
 }
+if (mode === 'runtime-sandbox-missing') {
+  process.stderr.write('warning: sandbox could not be applied; refusing to start rather than run unsandboxed\n');
+}
 
 const resultFile = after('--output-last-message');
 if (mode !== 'missing') {

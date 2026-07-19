@@ -538,6 +538,18 @@ test('installed Grok unable to initialize a named sandbox fails capability prefl
   } finally { cleanup(ctx); }
 });
 
+test('Grok runtime sandbox loss blocks a provider success after preflight', () => {
+  const ctx = setup();
+  try {
+    const { proc, parsed } = invoke(ctx, {
+      provider: 'grok', role: 'review', mode: 'runtime-sandbox-missing',
+    });
+    assert.equal(proc.status, 10);
+    assert.equal(parsed.status, 'blocked');
+    assert.match(parsed.diagnostics.message, /requested sandbox was not enforced/u);
+  } finally { cleanup(ctx); }
+});
+
 test('timeout kills the subprocess and produces a normalized timed_out result', () => {
   const ctx = setup();
   try {
