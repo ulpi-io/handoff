@@ -49,8 +49,9 @@ test('grok: prompt via --prompt-file PATH (bytes stay in the file), plan for rev
 test('kiro: prompt via stdin, trust scoped (review has NO fs_write, build does)', () => {
   const r = kiro.invocation({ verb: 'review' });
   assert.equal(r.stdin, 'file');
-  assert.ok(r.args.some((a) => a === '--trust-tools=fs_read,execute_bash'));
+  assert.ok(r.args.some((a) => a === '--trust-tools=fs_read'));
   assert.ok(!r.args.some((a) => a.includes('fs_write')));   // review cannot write
+  assert.ok(!r.args.some((a) => a.includes('execute_bash'))); // bash is not a read-only capability
   const b = kiro.invocation({ verb: 'build' });
   assert.ok(b.args.some((a) => a === '--trust-tools=fs_read,fs_write,execute_bash'));
 });
@@ -103,7 +104,7 @@ test('no adapter ever puts the literal prompt bytes into argv', () => {
 });
 
 // ---- dangerous levers gated behind --mode autonomous ----
-test('bypass/danger/trust-all levers appear ONLY under --mode autonomous', () => {
+test('legacy bypasses remain explicit, while Codex and Kiro never select dangerous bypasses', () => {
   // scoped (default): none of the dangerous tokens
   assert.ok(!codex.invocation({ verb: 'build', cwd: '/w' }).args.includes('danger-full-access'));
   assert.ok(!grok.invocation({ verb: 'build', cwd: '/w', promptFile: BRIEF }).args.includes('bypassPermissions'));
@@ -111,13 +112,54 @@ test('bypass/danger/trust-all levers appear ONLY under --mode autonomous', () =>
   assert.ok(!claude.invocation({ verb: 'build', cwd: '/w' }).args.includes('bypassPermissions'));
   assert.ok(!opencode.invocation({ verb: 'build', cwd: '/w', promptFile: BRIEF }).args.includes('--auto'));
   assert.ok(!cursor.invocation({ verb: 'build', cwd: '/w' }).args.includes('--approve-mcps')); // cursor's extra bypass
-  // autonomous: each unlocks its bypass
-  assert.ok(codex.invocation({ verb: 'build', cwd: '/w', mode: 'autonomous' }).args.includes('danger-full-access'));
+  // Codex and Kiro never select their dangerous bypass, even if old callers pass autonomous.
+  assert.ok(!codex.invocation({ verb: 'build', cwd: '/w', mode: 'autonomous' }).args.includes('danger-full-access'));
+  assert.ok(!codex.invocation({ verb: 'build', cwd: '/w', mode: 'autonomous' }).args.includes('--skip-git-repo-check'));
+  assert.ok(!kiro.invocation({ verb: 'build', mode: 'autonomous' }).args.includes('--trust-all-tools'));
+  // Other interactive-only legacy adapters retain their explicitly requested compatibility mode.
   assert.ok(grok.invocation({ verb: 'build', cwd: '/w', promptFile: BRIEF, mode: 'autonomous' }).args.includes('bypassPermissions'));
-  assert.ok(kiro.invocation({ verb: 'build', mode: 'autonomous' }).args.includes('--trust-all-tools'));
   assert.ok(claude.invocation({ verb: 'build', cwd: '/w', mode: 'autonomous' }).args.includes('bypassPermissions'));
   assert.ok(opencode.invocation({ verb: 'build', cwd: '/w', promptFile: BRIEF, mode: 'autonomous' }).args.includes('--auto'));
   assert.ok(cursor.invocation({ verb: 'build', cwd: '/w', mode: 'autonomous' }).args.includes('--approve-mcps'));
+});
+
+test('no adapter invocation ever uses --skip-git-repo-check', () => {
+  for (const adapter of [codex, grok, kiro, claude, opencode, cursor]) {
+    for (const verb of ['build', 'review']) {
+      for (const mode of ['scoped', 'autonomous']) {
+        const invocation = adapter.invocation({ verb, mode, cwd: '/w', promptFile: BRIEF });
+        assert.ok(!invocation.args.includes('--skip-git-repo-check'));
+      }
+    }
+  }
+});
+
+test('pipeline adapters pin hardened policies and strict result channels', () => {
+  const c = codex.pipelineInvocation({
+    bin: '/fake/codex', role: 'phase', cwd: '/w', schemaFile: '/tmp/schema', lastMsgFile: '/tmp/result',
+  });
+  assert.ok(c.args.includes('--ephemeral'));
+  assert.ok(c.args.includes('--ignore-user-config'));
+  assert.ok(c.args.includes('--ignore-rules'));
+  assert.ok(c.args.includes('workspace-write'));
+  assert.ok(c.args.includes('approval_policy="never"'));
+  assert.ok(!c.args.includes('--skip-git-repo-check'));
+  assert.ok(!c.args.includes('danger-full-access'));
+
+  const g = grok.pipelineInvocation({
+    bin: '/fake/grok', role: 'verify', cwd: '/w', promptFile: '/tmp/prompt', schemaJson: '{}',
+  });
+  assert.equal(g.args[g.args.indexOf('--sandbox') + 1], 'read-only');
+  assert.ok(g.args.includes('--disable-web-search'));
+  assert.ok(g.args.includes('--no-subagents'));
+  assert.ok(g.args.includes('--no-memory'));
+  assert.equal(g.args[g.args.indexOf('--max-turns') + 1], '12');
+
+  const k = kiro.pipelineInvocation({ bin: '/fake/kiro', role: 'review' });
+  assert.ok(k.args.includes('--trust-tools=fs_read'));
+  assert.ok(!k.args.some((arg) => arg.includes('execute_bash')));
+  assert.equal(k.policy.filesystem, 'permission-only');
+  assert.equal(k.policy.nativeFilesystemIsolation, false);
 });
 
 // ---- provider capture: envelope parsing (claude) + plain text (opencode) ----

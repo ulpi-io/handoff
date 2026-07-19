@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ulpi.io/handoff/contracts/v0.2/request.schema.json",
+  "title": "Handoff v0.2 machine request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "instructions"],
+  "properties": {
+    "schemaVersion": { "const": "handoff.request.v0.2" },
+    "instructions": { "type": "string", "minLength": 1, "maxLength": 2000000 },
+    "timeoutMs": { "type": "integer", "minimum": 100, "maximum": 3600000 },
+    "model": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^(?![-\\s])[^\\u0000-\\u001F\\u007F]*\\S$" },
+    "effort": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^(?![-\\s])[^\\u0000-\\u001F\\u007F]*\\S$" },
+    "externalConfinement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "receiptId", "issuer", "policy", "cwd"],
+      "properties": {
+        "schemaVersion": { "const": "handoff.external-confinement.v0.2" },
+        "receiptId": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "issuer": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "policy": { "enum": ["workspace-write", "read-only"] },
+        "cwd": { "type": "string", "minLength": 1, "maxLength": 4096 }
+      }
+    }
+  }
+}

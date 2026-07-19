@@ -1,52 +1,59 @@
-# Provider adapter cheat-sheet
+# Provider adapter reference (handoff v0.2)
 
-Every provider reduces to the same 6 primitives; only the middle differs. Verified against:
-Codex `codex-cli 0.144.5`, Grok "Grok Build TUI", Kiro `kiro-cli chat`, Claude Code `claude -p`,
-opencode `1.18.3`, Cursor `cursor-agent 2025.10.28`. **Re-confirm flags against `<cli> --help` when a
-provider updates** — pin to reality, never to memory.
+The legacy interactive helper supports all six providers. The strict machine API advertises only
+Codex, Grok, and Kiro as pipeline-safe; capability preflight checks the installed CLI before every
+machine run.
 
-| Primitive | codex | grok | kiro | claude | opencode | cursor |
+## Pipeline adapters
+
+| Boundary | Codex | Grok | Kiro |
+|---|---|---|---|
+| Binary | `codex` | `grok` | `kiro-cli` |
+| Roles | build, phase, review, verify | build, phase, review, verify | build, phase, review, verify |
+| Prompt bytes | stdin via trailing `-` | generated `--prompt-file PATH` | stdin |
+| build / phase | `--sandbox workspace-write` | `--sandbox workspace --permission-mode auto` | `--trust-tools=fs_read,fs_write,execute_bash` (**permission-only**) |
+| review / verify | `--sandbox read-only` | `--sandbox read-only --permission-mode plan` | `--trust-tools=fs_read` (no bash; **permission-only**) |
+| Structured result | `--output-schema FILE` and `--output-last-message FILE` | `--json-schema JSON` | strict prompt contract plus exact-JSON parser; prose fails closed |
+| Pin cwd | `--cd ABSOLUTE_CWD` and child cwd | `--cwd ABSOLUTE_CWD` and child cwd | child cwd |
+| Other hardening | `--ephemeral --ignore-user-config --ignore-rules --config approval_policy="never"` | `--disable-web-search --no-subagents --no-memory --max-turns 12` | never `--trust-all-tools`; no native filesystem-isolation claim |
+| Required preflight flags | config, sandbox, cd, ephemeral, ignore-user-config/rules, output schema/message | cwd, named sandbox, JSON schema, max turns, web/subagent/memory disables | non-interactive and trust-tools |
+
+Codex machine execution never uses `--skip-git-repo-check`, `danger-full-access`, or
+`--dangerously-bypass-approvals-and-sandbox`.
+
+Grok uses its named built-in `workspace` and `read-only` sandbox profiles. The driver fails preflight
+if the installed binary cannot show both named-sandbox selection and structured-result support. Web
+search, subagents, and memory are disabled independently of sandbox selection. Network behavior of
+the built-in profiles is platform-dependent and is reported honestly in each policy. `workspace`
+still permits writes to the pinned cwd, Grok state, and temporary directories; `read-only` protects
+the repository but retains Grok-state and temporary-directory writes. Neither profile is described as
+a host-wide read boundary.
+
+Kiro tool trust controls approval, not native filesystem access. `review` and `verify` receive only
+`fs_read`; `execute_bash` is deliberately absent because arbitrary bash is not read-only. `build` and
+`phase` are always labeled `permission-only` unless the request contains a matching
+`handoff.external-confinement.v0.2` assertion. Handoff reports such an assertion with
+`verifiedByDriver: false`; it does not upgrade Kiro's own tool permissions into a sandbox claim.
+
+## Interactive compatibility adapters
+
+| Primitive | Codex | Grok | Kiro | Claude | opencode | Cursor |
 |---|---|---|---|---|---|---|
-| Binary (PATH + fallback) | `codex` (`/opt/homebrew/bin`) | `grok` (`~/.grok/bin`) | `kiro-cli` (`~/.local/bin`) | `claude` (`~/.local/bin`) | `opencode` (`~/.opencode/bin`) | `cursor-agent` (`~/.local/bin`) |
 | Headless invoke | `codex exec … -` | `grok --prompt-file P` | `kiro-cli chat --no-interactive` | `claude -p --output-format json` | `opencode run` | `cursor-agent -p --output-format text` |
-| Prompt as literal bytes | **stdin** (the `-`) | **`--prompt-file P`** (bytes in file) | **stdin** | **stdin** (no positional) | **`--file P`** (bytes in file) | **stdin** (no positional) |
-| Trust lever | `-s read-only \| workspace-write \| danger-full-access` | `--permission-mode plan \| auto \| bypassPermissions` | `--trust-tools=…` / `--trust-all-tools` | `--permission-mode manual \| auto \| bypassPermissions` | `--agent plan \| build` / `--auto` | `-f/--force` (NO read-only lever) / `--approve-mcps` |
-| review (read-only) | `-s read-only` | `--permission-mode plan` | `--trust-tools=fs_read,execute_bash` | `--permission-mode manual` | `--agent plan` | `-p` (no `--force`) — **best-effort only** |
-| build (least-write) | `-s workspace-write` | `--permission-mode auto` | `--trust-tools=fs_read,fs_write,execute_bash` | `--permission-mode auto` | `--agent build` | `-p --force` (force-allow) |
-| autonomous (opt-in only) | `-s danger-full-access` | `--permission-mode bypassPermissions` | `--trust-all-tools` | `--permission-mode bypassPermissions` | `--agent build --auto` | `-p --force --approve-mcps` |
-| model / effort | `-m` / (config) | `-m` / `--effort` | `--model` / `--effort` | `--model` / `--effort` | `-m provider/model` / `--variant` | `--model` / (none) |
-| structured findings | `--output-schema FILE` | `--json-schema '<inline>'` | none — ask for JSON in the prompt | `--json-schema '<inline>'` → `structured_output` | none — ask for JSON in the prompt | none — ask for JSON in the prompt |
-| final message capture | `-o/--output-last-message FILE` | `--output-format json` (stdout) | stdout (markdown) | `.result` in JSON envelope (stdout) | stdout (text) | stdout (text) |
-| resume | native `codex exec resume` (not via handoff v1) | `-r/--resume [ID]` / `-c` | `-r` / `--resume-id ID` | `--continue` / `--resume ID` | `-c` / `--session ID` | `--continue` / `--resume ID` |
-| working dir | `-C DIR` | `--cwd DIR` | (process cwd) | (process cwd) | `--dir DIR` | (process cwd) |
-| NEVER default | `--dangerously-bypass-approvals-and-sandbox` | `--permission-mode bypassPermissions` | `--trust-all-tools` | `--permission-mode bypassPermissions` | `--auto` | `--force` on a review |
+| Prompt bytes | stdin | file | stdin | stdin | file | stdin |
+| review lever | `-s read-only` | permission plan | `fs_read` allowlist | permission manual | plan agent | no `--force` (best-effort only) |
+| build lever | `-s workspace-write` | permission auto | read/write/bash allowlist | permission auto | build agent | `--force` |
+| structured review | output schema | JSON schema | prompt contract | JSON schema envelope | prompt contract | prompt contract |
+| resume | use native Codex directly | supported | supported | supported | supported | supported |
 
-Notes:
-- Codex `exec` is already non-interactive — there is **no** `--full-auto` in 0.144.5; the sandbox policy
-  alone gates writes.
-- Grok `--sandbox` takes a named *profile* (env `GROK_SANDBOX`), so handoff uses `--permission-mode` as
-  the portable trust lever instead of a profile name it can't assume exists.
-- Kiro `chat` has no structured-output flag (`--format` is only for `--list-*`), so review findings come
-  back as text; the brief asks for a JSON block when structure is needed.
-- Claude `-p` reads the prompt from stdin (no positional argument). `plan` mode is **not**
-  headless-suitable (it blocks waiting on interactive `ExitPlanMode`), so review uses `manual` — which
-  denies edits and mutating bash in headless while allowing read-only inspection. `build` uses `auto`
-  (edits + bash auto-approved via the safety classifier, dangerous patterns blocked) — a scoped lever,
-  **not** the `bypassPermissions` bypass. Structured review returns the schema-conforming object under
-  the envelope's `structured_output` field.
-- opencode ships `plan` (read-only: edits/bash gated) and `build` primary agents, selected with
-  `--agent`; `run` is non-interactive by default (`-i` opts into interactive). No clean structured-output
-  flag (`--format json` is a raw event stream), so review findings come back as text and the brief asks
-  for a JSON block. The brief is delivered via `--file` (a PATH); the only positional argument is a fixed
-  "follow the attached brief" instruction — never the (untrusted) brief bytes.
-- Cursor `-p` already "has access to all tools, including write and bash" and exposes **no per-run
-  read-only lever** — permissions live only in `~/.cursor/cli-config.json` (or `<cwd>/.cursor/cli.json`).
-  So `review` is **best-effort read-only**: it runs `-p` without `--force`, relying on Cursor's allowlist
-  approval mode (un-allowed writes get no approval in headless) plus the read-only brief — weaker than
-  the other five. `build` uses `-p --force` (force-allow), verified by the real git diff. The prompt goes
-  on **stdin** (cursor has no `--prompt-file`); if cursor ignored stdin the run just fails closed — never
-  an argv leak. Auth is probed with `--version` only; **never** `status`/`whoami` (they start a login
-  flow). A logged-out cursor exits nonzero at run time (surfaced honestly, never a fake clean).
+The compatible CLI remains:
 
-Adding a provider = one `scripts/lib/providers/<name>.mjs` implementing `locate / authOk / invocation /
-capture`, plus two command shims. The driver (`scripts/handoff.mjs`) already owns everything else.
+```bash
+node /absolute/path/to/handoff/scripts/handoff.mjs \
+  --provider <codex|grok|kiro|claude|opencode|cursor> \
+  --verb <build|review> --prompt-file /absolute/brief.md --cwd /absolute/git-worktree
+```
+
+Provider auth is not inferred from prose. Missing binaries and failed executions remain non-green.
+The machine E2E suite replaces every provider with a fake executable and never reads live auth or
+global configuration.

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ulpi.io/handoff/contracts/v0.2/capabilities.schema.json",
+  "title": "Handoff v0.2 capabilities",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "driverVersion", "bundleVersion", "bundleDigest", "roles", "providers"],
+  "properties": {
+    "schemaVersion": { "const": "handoff.capabilities.v0.2" },
+    "driverVersion": { "const": "0.2.0" },
+    "bundleVersion": { "const": "0.2.0" },
+    "bundleDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "roles": { "type": "array", "items": { "enum": ["build", "phase", "review", "verify"] } },
+    "providers": { "type": "array" }
+  }
+}

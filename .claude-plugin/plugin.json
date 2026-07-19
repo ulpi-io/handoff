@@ -1,7 +1,7 @@
 {
   "name": "handoff",
-  "version": "0.1.0",
-  "description": "Hand off a build or review task to another one-shot headless agent — Codex, Grok, Kiro, Claude, opencode, or Cursor — over a single uniform, fail-closed contract. `/handoff:codex-build`, `/handoff:claude-review`, etc. The prompt is fed as literal bytes (never argv), trust is scoped to the verb (read-only for review, least-write for build), and an agent that cannot run is reported as gateNotRun, never a fabricated clean.",
+  "version": "0.2.0",
+  "description": "Hand off interactive build/review tasks to Codex, Grok, Kiro, Claude, opencode, or Cursor, plus a strict versioned machine API for hardened Codex, Grok, and Kiro pipeline runs. `/handoff:codex-build`, `/handoff:claude-review`, etc. Prompt bytes stay off argv and every machine result fails closed with Git evidence.",
   "author": {
     "name": "ulpi.io",
     "url": "https://github.com/ulpi-io"

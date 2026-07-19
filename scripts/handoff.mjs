@@ -3,19 +3,21 @@
 // ~50-line adapter in lib/providers/. Dispatch on --provider/--verb; the adapter only fills the
 // CLI-specific middle (binary, args, trust flag, capture).
 //
-// Contract (identical for codex | grok | kiro, build | review):
+// Legacy contract (all six providers, build | review):
 //   1. locate the binary        → missing ⇒ gateNotRun (report + install hint, exit 3). Never auto-install.
 //   2. auth probe               → not ok  ⇒ gateNotRun (report, exit 4).
 //   3. read the brief from --prompt-file (literal bytes; NEVER argv/shell/heredoc).
-//   4. build ⇒ record baseline HEAD (verify by real diff, not self-report).
-//   5. invoke: trust scoped to the verb (read-only review / least-write build); bypass ONLY on
-//      an explicit `--mode autonomous`. Prompt delivered via stdin or --prompt-file, never argv.
-//   6. capture + report GROUND TRUTH: build ⇒ `git diff --stat <baseline>`; review ⇒ findings.
+//   4. record a complete Git/worktree fingerprint (verify real effects, not self-report).
+//   5. invoke with trust scoped to the verb. Prompt delivered via stdin or --prompt-file, never argv.
+//   6. capture + report GROUND TRUTH: build ⇒ before/after Git evidence; review ⇒ findings + no mutation.
 //      A CLI that could not run is reported nonRun — never a fabricated clean or block.
 //
 // Usage:
 //   node handoff.mjs --provider <codex|grok|kiro|claude|opencode|cursor> --verb <build|review> --prompt-file <PATH>
 //        [--cwd DIR] [--model M] [--effort E] [--resume [ID]] [--structured] [--mode autonomous] [--json]
+//   node handoff.mjs capabilities --json
+//   node handoff.mjs run --provider <codex|grok|kiro> --role <build|phase|review|verify>
+//        --cwd <ABS> --request <ABS> --result <ABS>
 import { spawnSync } from 'node:child_process';
 import { writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -29,8 +31,14 @@ import * as claude from './lib/providers/claude.mjs';
 import * as opencode from './lib/providers/opencode.mjs';
 import * as cursor from './lib/providers/cursor.mjs';
 import { readPromptFile, HandoffError } from './lib/prompt.mjs';
-import { isRepo, headSha, diffStat } from './lib/git.mjs';
+import { isRepo, gitFingerprint, compareGitFingerprints } from './lib/git.mjs';
 import { REVIEW_SCHEMA, renderFindings } from './lib/render.mjs';
+import {
+  executeMachineRun,
+  machineCapabilities,
+  machineFailure,
+  parseMachineCli,
+} from './lib/machine.mjs';
 
 const PROVIDERS = { codex, grok, kiro, claude, opencode, cursor };
 const VERBS = new Set(['build', 'review']);
@@ -83,11 +91,14 @@ function run(opts) {
     return fail(EXIT.USAGE, `${adapter.displayName} resume is not supported by handoff v1 — use the CLI's native resume directly.`);
   }
 
-  // (4) baseline for build.
-  const baseline = opts.verb === 'build' ? headSha(opts.cwd) : null;
-  if (opts.verb === 'build' && !isRepo(opts.cwd)) {
-    return fail(EXIT.BAD_HANDOFF, `--cwd '${opts.cwd}' is not a git repo — a build handoff needs one to verify the diff.`);
+  // (4) Builds require Git evidence. Legacy v0.1 reviews remain usable outside Git; when Git is
+  // available they still get before/after mutation detection.
+  const repo = isRepo(opts.cwd);
+  if (opts.verb === 'build' && !repo) {
+    return fail(EXIT.BAD_HANDOFF, `--cwd '${opts.cwd}' is not a git repo — a build handoff needs one to verify ground truth.`);
   }
+  const beforeGit = repo ? gitFingerprint(opts.cwd) : null;
+  const baseline = beforeGit?.head ?? null;
 
   // structured review: hand each provider the SAME canonical schema in its native form.
   let schemaFile, schemaJson;
@@ -127,17 +138,24 @@ function run(opts) {
     ok: cap.ok, text: cap.text, stderr: cap.stderr, nonRun: false,
   };
 
+  const afterGit = beforeGit ? gitFingerprint(opts.cwd) : null;
+  const comparison = beforeGit ? compareGitFingerprints(beforeGit, afterGit) : { changed: false, files: [] };
+  result.gitBefore = beforeGit;
+  result.gitAfter = afterGit;
   if (opts.verb === 'build') {
-    const diff = diffStat(opts.cwd, baseline);
     result.baseline = baseline;
-    result.changedFiles = diff.files;
-    result.diffStat = diff.stat;
+    result.changedFiles = comparison.files;
+    result.diffStat = comparison.files.map((path) => `changed ${JSON.stringify(path)}`).join('\n');
     // honesty gate: a "build" that ran clean but changed NOTHING is not a success — surface it.
-    if (cap.ok && !diff.changed) { result.ok = false; result.exit = EXIT.NO_DIFF; result.warning = 'build handoff produced NO diff — treat as non-completion, not a clean pass.'; }
+    if (cap.ok && !comparison.changed) { result.ok = false; result.exit = EXIT.NO_DIFF; result.warning = 'build handoff produced NO Git-observable change — treat as non-completion, not a clean pass.'; }
     else result.exit = cap.ok ? EXIT.OK : EXIT.RAN_NONZERO;
   } else {
     if (wantStructured && cap.findings) result.findings = cap.findings;
-    result.exit = cap.ok ? EXIT.OK : EXIT.RAN_NONZERO;
+    if (comparison.changed) {
+      result.ok = false;
+      result.exit = EXIT.BAD_HANDOFF;
+      result.warning = 'review handoff mutated the worktree — blocked.';
+    } else result.exit = cap.ok ? EXIT.OK : EXIT.RAN_NONZERO;
   }
   return result;
 }
@@ -176,18 +194,37 @@ export { parseArgs, run, EXIT }; // for tests
 import { fileURLToPath } from 'node:url';
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
-  let opts;
-  try { opts = parseArgs(process.argv.slice(2)); }
-  catch (e) { console.error(`✗ ${e.message}`); process.exit(EXIT.USAGE); }
+  if (process.argv[2] === 'capabilities' || process.argv[2] === 'run') {
+    let machine;
+    try {
+      const options = parseMachineCli(process.argv.slice(2));
+      if (options.command === 'capabilities') {
+        process.stdout.write(`${JSON.stringify(machineCapabilities())}\n`);
+        process.exitCode = 0;
+      } else {
+        machine = await executeMachineRun(options);
+        process.stdout.write(`${JSON.stringify(machine.result)}\n`);
+        process.exitCode = machine.exitCode;
+      }
+    } catch (error) {
+      machine = machineFailure(error);
+      process.stdout.write(`${JSON.stringify(machine.result)}\n`);
+      process.exitCode = machine.exitCode;
+    }
+  } else {
+    let opts;
+    try { opts = parseArgs(process.argv.slice(2)); }
+    catch (e) { console.error(`✗ ${e.message}`); process.exit(EXIT.USAGE); }
 
-  let result;
-  try { result = run(opts); }
-  catch (e) {
-    if (e instanceof HandoffError) { console.error(`✗ ${e.message}`); process.exit(EXIT.BAD_HANDOFF); }
-    throw e;
+    let result;
+    try { result = run(opts); }
+    catch (e) {
+      if (e instanceof HandoffError) { console.error(`✗ ${e.message}`); process.exit(EXIT.BAD_HANDOFF); }
+      throw e;
+    }
+
+    if (opts.json) console.log(JSON.stringify(result, null, 2));
+    else console.log(renderHuman(result));
+    process.exitCode = result.exit ?? EXIT.OK;
   }
-
-  if (opts.json) console.log(JSON.stringify(result, null, 2));
-  else console.log(renderHuman(result));
-  process.exit(result.exit ?? EXIT.OK);
 }

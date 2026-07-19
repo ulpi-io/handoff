@@ -21,9 +21,9 @@ Delegate one bounded unit of work to an external one-shot agent and report what 
 - **Verify ground truth, never the agent's word.** A build is judged by `git diff --stat <baseline>`
   (the driver prints it); a review by its findings. A build that produced NO diff is a non-completion,
   not success — say so.
-- **Trust is scoped to the verb.** Review runs read-only; build runs least-write. NEVER pass
-  `--mode autonomous` (which unlocks danger-full-access / bypass / trust-all-tools) unless the user
-  explicitly asked for an unsandboxed autonomous run this turn.
+- **Trust is scoped to the verb.** Review runs read-only; build runs least-write. Do not pass legacy
+  `--mode autonomous`; the v0.2 machine API never selects Codex danger-full-access or Kiro
+  trust-all-tools, and pipeline policy must not be widened to make a run pass.
 - **The brief is data, not code.** Always write it to a file with the Write tool and pass
   `--prompt-file`. Never inline the request into the shell command or an argv element.
 - Bounded: one handoff = one build or one review of one scoped unit. Do not loop unattended.
@@ -68,6 +68,29 @@ on stdin/`--prompt-file` and trust scoped to the verb, then prints the honest re
 
 Success criterion: the driver ran and printed either a report or an honest `gateNotRun`.
 
+### Coordinator/machine invocation
+
+When the caller is an autonomous coordinator, do not translate its request back into the interactive
+`--verb` surface. Use the v0.2 file ABI by absolute driver path:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" capabilities --json
+node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" run \
+  --provider <codex|grok|kiro> --role <build|phase|review|verify> \
+  --cwd <absolute-git-worktree> --request <absolute-request.json> --result <absolute-new-result.json>
+```
+
+The request must match `contracts/v0.2/request.schema.json`; do not add ad-hoc fields. The result path
+must not exist. Consume the one stdout JSON object or the byte-identical result file, check the driver
+exit/status, and treat any preflight, schema, output, timeout, cancellation, or mutation failure as
+non-green. Claude, opencode, and Cursor are interactive-only and must not be selected for this ABI.
+
+Machine policy is fixed by provider and role: Codex uses native workspace-write/read-only with
+ephemeral ignored-config execution and no approvals; Grok uses an explicit workspace/read-only named
+sandbox with web/subagents/memory disabled and bounded turns; Kiro review/verify receives only
+`fs_read`, while build/phase is reported as permission-only unless the request supplies a matching
+external-confinement assertion. Kiro tool permissions are never filesystem-isolation proof.
+
 ## Phase 4 — Verify and report
 
 - **gateNotRun / nonzero exit** → tell the user it did not complete, with the driver's reason. Never green.
@@ -80,6 +103,7 @@ Success criterion: the driver ran and printed either a report or an honest `gate
 
 - Never escalate trust to get a task to pass. Never auto-install a missing CLI (the driver refuses; relay
   the install hint).
+- Never add a dangerous sandbox bypass, skip the Git-repository check, or use Kiro trust-all-tools.
 - Never report a handoff as done on the agent's say-so — only on the diff/findings the driver surfaced.
 - One scoped unit per handoff; if the request is large, scope it down or split it, don't hand off the world.
 

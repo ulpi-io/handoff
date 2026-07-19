@@ -1,11 +1,12 @@
 // codex.mjs — adapter for the Codex CLI (verified against codex-cli 0.144.5).
 //   headless invoke : codex exec [OPTIONS] -   (prompt read from stdin via the `-`)
-//   trust lever     : -s read-only | workspace-write | danger-full-access
+//   trust lever     : -s read-only | workspace-write
 //   structured out  : --output-schema <FILE>   final message : -o/--output-last-message <FILE>
 //   NOTE: this version has NO `--full-auto` flag — `codex exec` is already non-interactive; the
 //   sandbox policy alone gates writes. Confirmed via `codex exec --help`.
 import { spawnSync } from 'node:child_process';
 import { locateExecutable } from '../which.mjs';
+import { flagPreflight } from '../provider-preflight.mjs';
 
 export const id = 'codex';
 export const displayName = 'Codex';
@@ -22,7 +23,6 @@ export function authOk(bin) {
 }
 
 function sandboxFor(verb, mode) {
-  if (mode === 'autonomous') return 'danger-full-access';
   return verb === 'build' ? 'workspace-write' : 'read-only';
 }
 
@@ -30,12 +30,49 @@ export function supportsResume() { return false; } // v1: use native `codex exec
 
 export function invocation({ verb, cwd, model, mode, lastMsgFile, schemaFile }) {
   const sandbox = sandboxFor(verb, mode);
-  const args = ['exec', '-s', sandbox, '-C', cwd, '--skip-git-repo-check'];
+  const args = ['exec', '-s', sandbox, '-C', cwd];
   if (model) args.push('-m', model);
   if (schemaFile) args.push('--output-schema', schemaFile);
   if (lastMsgFile) args.push('-o', lastMsgFile);
   args.push('-'); // read the prompt as literal bytes from stdin
   return { bin: locate(), args, stdin: 'file', trustNote: `-s ${sandbox}` };
+}
+
+export const pipelineRoles = Object.freeze(['build', 'phase', 'review', 'verify']);
+
+export function pipelinePreflight(bin) {
+  return flagPreflight(bin, {
+    helpArgs: ['exec', '--help'],
+    requiredFlags: [
+      '--config', '--sandbox', '--cd', '--ephemeral', '--ignore-user-config', '--ignore-rules',
+      '--output-schema', '--output-last-message',
+    ],
+  });
+}
+
+export function pipelinePolicy(role) {
+  const sandbox = role === 'build' || role === 'phase' ? 'workspace-write' : 'read-only';
+  return {
+    enforcement: 'native-filesystem-sandbox',
+    filesystem: sandbox,
+    approvals: 'never',
+    ephemeral: true,
+    userConfiguration: 'ignored',
+    projectRules: 'ignored',
+  };
+}
+
+export function pipelineInvocation({ bin, role, cwd, model, schemaFile, lastMsgFile }) {
+  const policy = pipelinePolicy(role);
+  const args = [
+    'exec', '--ephemeral', '--ignore-user-config', '--ignore-rules',
+    '--config', 'approval_policy="never"',
+    '--sandbox', policy.filesystem, '--cd', cwd,
+    '--output-schema', schemaFile, '--output-last-message', lastMsgFile,
+  ];
+  if (model) args.push('--model', model);
+  args.push('-');
+  return { bin, args, stdin: 'prompt', resultSource: { type: 'file', path: lastMsgFile }, policy };
 }
 
 export function capture({ code, stdout, stderr, finalMessage }) {
