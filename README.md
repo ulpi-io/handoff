@@ -176,8 +176,8 @@ that requires disposal or process-level isolation must create and confine it bef
 Claude, OpenCode, and Cursor remain available through the compatible interactive helper and are
 advertised as `pipeline.safe: false`. That status means this repository has not implemented and
 preflighted a v0.2 adapter for them; it is not a claim that their CLIs lack automation or security
-features. The following facts were checked against the linked official documentation and the installed
-CLI help on 2026-07-19:
+features. The following facts were checked against the linked official documentation on 2026-07-19
+and cross-checked against installed CLI help where that provider binary was available:
 
 - [Claude Code](https://code.claude.com/docs/en/cli-usage) supports bare scripted execution,
   permission/tool controls, no-session persistence, native Bash sandbox settings, and
