@@ -51,7 +51,7 @@ confinement receipt can upgrade Kiro into a writable pipeline provider.
 |---|---|---|---|---|---|---|
 | Headless invoke | `codex exec … -` | `grok --prompt-file P` | `kiro-cli chat --no-interactive` | `claude -p --output-format json` | `opencode run` | `cursor-agent -p --output-format text` |
 | Prompt bytes | stdin | file | stdin | stdin | file | stdin |
-| review lever | `-s read-only` | permission plan | `fs_read` allowlist | permission manual | plan agent | no `--force` (best-effort only) |
+| review lever | `-s read-only` | permission plan | `fs_read` allowlist | permission manual | plan agent | no `--force`; mutation check |
 | build lever | `-s workspace-write` | permission auto | read/write/bash allowlist | permission auto | build agent | `--force` |
 | structured review | output schema | JSON schema | prompt contract | JSON schema envelope | prompt contract | prompt contract |
 | resume | use native Codex directly | supported | supported | supported | supported | supported |
@@ -68,7 +68,9 @@ Provider auth is not inferred from prose. Missing binaries and failed executions
 The machine E2E suite replaces every provider with a fake executable and never reads live auth or
 global configuration.
 
-OpenCode and Cursor remain present in this interactive table but are not pipeline-safe. OpenCode lacks
-verified filesystem confinement and a native strict-result channel; Cursor lacks a per-run read-only
-sandbox and uses `--force` for builds. Claude is likewise interactive-only until its configuration and
-permission boundary is hardened for this ABI.
+OpenCode, Cursor, and Claude remain present in this interactive table but are not pipeline-safe because
+handoff has no v0.2 invocation and preflight for them. This is an implementation status, not a claim
+that the provider CLIs lack relevant controls. A future OpenCode adapter must isolate merged config,
+pin permissions, and normalize raw JSON events. A future Cursor adapter must isolate config, prove its
+selected sandbox/permission policy, and validate the strict result. A future Claude adapter must combine
+and preflight bare mode, settings/tool controls, native Bash sandboxing, and schema output.

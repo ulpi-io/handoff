@@ -62,7 +62,7 @@ test('claude: prompt via stdin (no positional), manual for review / auto for bui
   assert.ok(r.args.includes('-p'));         // headless print mode
   assert.ok(!r.args.includes(BRIEF));       // the prompt-file path is not passed to claude
   const pm = r.args.indexOf('--permission-mode');
-  assert.ok(pm >= 0 && r.args[pm + 1] === 'manual'); // review is strict read-only
+  assert.ok(pm >= 0 && r.args[pm + 1] === 'manual'); // narrow compatible review permission mode
   const b = claude.invocation({ verb: 'build', cwd: '/w' });
   const bpm = b.args.indexOf('--permission-mode');
   assert.ok(bpm >= 0 && b.args[bpm + 1] === 'auto'); // build edits + runs, classifier-guarded
@@ -83,12 +83,12 @@ test('opencode: prompt via --file PATH (bytes stay in the file), plan for review
   assert.ok(bag >= 0 && b.args[bag + 1] === 'build');
 });
 
-test('cursor: prompt via stdin (no positional), review has NO --force, build does (best-effort RO)', () => {
+test('cursor: prompt via stdin (no positional), review omits --force and build includes it', () => {
   const r = cursor.invocation({ verb: 'review', cwd: '/w' });
   assert.equal(r.stdin, 'file');            // driver pipes bytes to stdin
   assert.ok(r.args.includes('-p'));
   assert.ok(!r.args.includes(BRIEF));       // no prompt-file path on argv
-  assert.ok(!r.args.includes('--force'));   // review does not force-allow writes (best-effort read-only)
+  assert.ok(!r.args.includes('--force'));   // review does not force-allow writes; Git evidence checks mutation
   const b = cursor.invocation({ verb: 'build', cwd: '/w' });
   assert.ok(b.args.includes('--force'));    // build force-allows writes
   assert.ok(!b.args.includes('--approve-mcps'));

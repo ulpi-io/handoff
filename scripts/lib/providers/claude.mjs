@@ -3,7 +3,8 @@
 //   headless invoke : claude -p --output-format json   (prompt read as literal bytes from stdin; the
 //                     entire stdin becomes the prompt — no positional prompt argument).
 //   trust lever     : --permission-mode manual | auto | bypassPermissions
-//                       review  → manual  (headless: denies edits + mutating bash; read-only bash ok)
+//                       review  → manual  (narrow legacy permission mode; handoff also rejects a
+//                                          review if Git evidence observes a mutation)
 //                       build   → auto    (headless: auto-approves edits + bash via the safety
 //                                          classifier, blocks dangerous patterns — NOT a full bypass)
 //                       autonomous → bypassPermissions (full bypass; opt-in only)
@@ -28,7 +29,8 @@ export function authOk(bin) {
   return { ok: true, note: 'auth is verified by claude at run time; a logged-out CLI surfaces as a run failure (never a fake clean).' };
 }
 
-// review = strict read-only (manual denies writes in headless); build = edit + run, classifier-guarded.
+// This is the compatible v0.1 permission choice, not the hardened v0.2 Claude policy. In particular,
+// the adapter does not select bare mode, isolate settings, or preflight Claude's native Bash sandbox.
 function permissionFor(verb, mode) {
   if (mode === 'autonomous') return 'bypassPermissions';
   return verb === 'build' ? 'auto' : 'manual';

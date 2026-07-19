@@ -170,8 +170,8 @@ test('capabilities --json is a one-object fake-provider preflight with honest pi
       assert.equal(capability.pipeline.safe, false);
       assert.match(capability.pipeline.reason, /interactive-only/u);
     }
-    assert.match(parsed.providers.find((entry) => entry.id === 'opencode').pipeline.reason, /without verified filesystem confinement/u);
-    assert.match(parsed.providers.find((entry) => entry.id === 'cursor').pipeline.reason, /no per-run read-only sandbox/u);
+    assert.match(parsed.providers.find((entry) => entry.id === 'opencode').pipeline.reason, /no v0\.2 adapter\/preflight/u);
+    assert.match(parsed.providers.find((entry) => entry.id === 'cursor').pipeline.reason, /no v0\.2 adapter\/preflight/u);
   } finally { cleanup(ctx); }
 });
 

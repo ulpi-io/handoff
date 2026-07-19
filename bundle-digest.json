@@ -27,5 +27,5 @@
     "scripts/lib/providers/kiro.mjs",
     "scripts/lib/providers/opencode.mjs"
   ],
-  "digest": "sha256:4c21dbfe7e366266615050318858d31883e150b5b59cef4548d2236b7c1d8b92"
+  "digest": "sha256:f8c925a749515f521c70b5b4f7b414e3040df92d8a67345fa58a4af13ddcc0f0"
 }

@@ -16,14 +16,17 @@ argument-hint: "<provider> <verb> — <what to build or review>"
 Delegate one bounded unit of work to an external one-shot agent and report what it ACTUALLY did.
 
 <EXTREMELY-IMPORTANT>
-- **Fail closed.** If the driver reports `gateNotRun` (CLI missing / not authed / could not run), that is
-  NOT a pass and NOT a block — report it as "did not run" and stop. Never invent a result.
+- **Fail closed.** If the driver reports `gateNotRun` (binary missing or nonresponsive before launch),
+  that is NOT a pass and NOT a block — report it as "did not run" and stop. Authentication or provider
+  failures from a launched process are nonzero failures, never green. Never invent a result.
 - **Verify ground truth, never the agent's word.** A build is judged by `git diff --stat <baseline>`
   (the driver prints it); a review by its findings. A build that produced NO diff is a non-completion,
   not success — say so.
-- **Trust is scoped to the verb.** Review runs read-only; build runs least-write. Do not pass legacy
-  `--mode autonomous`; the v0.2 machine API never selects Codex danger-full-access or Kiro
-  trust-all-tools, and pipeline policy must not be widened to make a run pass.
+- **Trust is scoped to the verb.** Review uses each compatible adapter's narrowest configured mode and
+  the driver rejects observed mutation; only the v0.2 provider matrix makes native-sandbox guarantees.
+  Build uses the adapter's least-write mode. Do not pass legacy `--mode autonomous`; the v0.2 machine
+  API never selects Codex danger-full-access or Kiro trust-all-tools, and pipeline policy must not be
+  widened to make a run pass.
 - **The brief is data, not code.** Always write it to a file with the Write tool and pass
   `--prompt-file`. Never inline the request into the shell command or an argv element.
 - Bounded: one handoff = one build or one review of one scoped unit. Do not loop unattended.

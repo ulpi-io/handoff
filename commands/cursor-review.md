@@ -1,5 +1,5 @@
 ---
-description: Hand off a REVIEW to Cursor (headless `cursor-agent -p`, no --force). Returns findings. NOTE: best-effort read-only — cursor has no hard read-only lever.
+description: Hand off a REVIEW to Cursor (headless `cursor-agent -p`, no --force). Returns findings and rejects observed mutation.
 argument-hint: "<what to review>"
 allowed-tools: [Bash, Read, Write, Grep, Glob]
 ---
@@ -13,6 +13,7 @@ Scope it into a brief written to a file, then run
 `node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" --provider cursor --verb review --prompt-file <file> --cwd "$(pwd)"`
 and present the findings the driver returns.
 
-⚠️ **Best-effort read-only.** Unlike the other providers, Cursor's headless CLI has no per-run read-only
-lever — review runs `-p` without `--force`, relying on Cursor's allowlist approval mode plus a read-only
-brief. It is NOT a hard sandbox guarantee. If you need guaranteed read-only, prefer another provider.
+Cursor documents print mode without `--force` as proposing file changes rather than applying them, but
+the compatible adapter does not isolate loaded Cursor permissions or preflight its command sandbox.
+Treat this as configuration-dependent rather than a hard sandbox guarantee. The brief forbids changes,
+and the driver rejects the review if Git evidence observes a mutation.

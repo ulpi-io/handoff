@@ -40,9 +40,9 @@ import {
 
 const PROVIDERS = { codex, grok, kiro, claude, opencode, cursor };
 const INTERACTIVE_ONLY_REASONS = Object.freeze({
-  claude: 'interactive-only: headless permission modes and configuration loading are not hardened for the v0.2 machine ABI',
-  opencode: 'interactive-only: plan/build are permission modes without verified filesystem confinement or a native strict-result channel',
-  cursor: 'interactive-only: no per-run read-only sandbox; build uses --force and no native strict-result channel exists',
+  claude: 'interactive-only: handoff has no v0.2 adapter/preflight for Claude bare-mode, configuration, tool, sandbox, and schema-output controls',
+  opencode: 'interactive-only: handoff has no v0.2 adapter/preflight that isolates merged configuration, pins permissions, and normalizes raw JSON events',
+  cursor: 'interactive-only: handoff has no v0.2 adapter/preflight that isolates configuration, proves the requested sandbox/permission policy, and validates a strict provider result',
 });
 
 export const MACHINE_EXIT = Object.freeze({
@@ -514,7 +514,7 @@ export async function executeMachineRun(options) {
     result.status = 'blocked';
     exitCode = MACHINE_EXIT.POLICY_BLOCK;
     setDiagnostics(result, {
-      message: `${options.role} mutated its disposable worktree${prior ? `; prior failure: ${prior}` : ''}`,
+      message: `${options.role} mutated the supplied worktree${prior ? `; prior failure: ${prior}` : ''}`,
       stderr: providerStderr,
     });
   }

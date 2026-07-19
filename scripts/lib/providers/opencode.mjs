@@ -3,8 +3,9 @@
 //                     (`run` is non-interactive by default; `-i` would make it interactive).
 //   prompt as bytes : --file BRIEF — the brief bytes stay IN the file (like grok's --prompt-file). The
 //                     positional message is a FIXED instruction with no untrusted bytes, never the brief.
-//   trust lever     : --agent plan (read-only) | --agent build (read/write/run). opencode ships both as
-//                     primary agents; `plan` has edits/bash gated, so it is fail-closed read-only headless.
+//   trust lever     : --agent plan | --agent build. OpenCode documents Plan as restricted, with edits
+//                     and bash gated by permissions, but configuration sources are merged. This legacy
+//                     adapter does not isolate that config or claim an OS filesystem sandbox.
 //   autonomous      : --auto — auto-approve permissions not explicitly denied ("dangerous!", opt-in only).
 //   model : -m provider/model   effort : --variant   cwd : --dir   resume : -c / --session ID
 //   NOTE: `run` has no clean structured-output flag (`--format json` is a raw event stream), so review
@@ -26,7 +27,7 @@ export function authOk(bin) {
   return { ok: true, note: 'auth is verified by opencode at run time; a logged-out CLI surfaces as a run failure.' };
 }
 
-// opencode ships two primary agents: `plan` is read-only (edits/bash gated), `build` can read/write/run.
+// OpenCode ships two primary agents: Plan is the narrower analysis agent; Build can read/write/run.
 function agentFor(verb) { return verb === 'build' ? 'build' : 'plan'; }
 
 export function supportsResume() { return true; }

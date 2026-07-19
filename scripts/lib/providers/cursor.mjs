@@ -2,11 +2,10 @@
 //   headless invoke : cursor-agent -p --output-format text   (prompt read as literal bytes from stdin;
 //                     NO positional prompt — injection-safe. cursor exposes no --prompt-file / --file, so
 //                     stdin is the only safe channel; if cursor ignored stdin the run just fails closed.)
-//   trust lever     : cursor has NO per-run read-only lever — `-p` already grants write+bash, and the
-//                     only per-run control is `-f/--force` (force-allow) vs the config allowlist. So:
-//                       review  → -p (no --force): BEST-EFFORT read-only. It relies on cursor's allowlist
-//                                 approval mode (un-allowed writes get no approval in headless) plus the
-//                                 read-only brief — this is WEAKER than the other providers' hard levers.
+//   trust lever     : review omits `--force`; build includes it. Cursor documents no-force print mode
+//                     as proposing rather than applying file changes, while installed help also says
+//                     print mode exposes write/bash tools and loads permission config. This compatible
+//                     adapter does not isolate that config or preflight Cursor's command sandbox.
 //                       build   → -p --force  (force-allow writes/shell; verified by the real git diff).
 //                       autonomous → -p --force --approve-mcps (also auto-approve MCP servers).
 //   model : --model   resume : --continue (most recent) / --resume <chatId>
@@ -41,7 +40,7 @@ export function invocation({ verb, model, mode, resume }) {
   if (resume) { if (typeof resume === 'string') args.push('--resume', resume); else args.push('--continue'); }
   const trustNote = mode === 'autonomous' ? '--force --approve-mcps'
     : verb === 'build' ? '--force'
-    : '-p (allowlist — best-effort read-only)';
+    : '-p without --force (configuration-dependent; mutation checked by Git evidence)';
   return { bin: locate(), args, stdin: 'file', trustNote }; // brief piped to stdin, never on argv
 }
 
