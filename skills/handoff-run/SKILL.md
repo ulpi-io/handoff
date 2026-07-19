@@ -80,16 +80,21 @@ node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" run \
   --cwd <absolute-git-worktree> --request <absolute-request.json> --result <absolute-new-result.json>
 ```
 
-The request must match `contracts/v0.2/request.schema.json`; do not add ad-hoc fields. The result path
+The request must match `contracts/v0.2/request.schema.json`; do not add ad-hoc fields. Every Codex
+machine request must carry a coordinator approval subject hash binding the exact task, role, cwd, and
+applicable `AGENTS.md`/`AGENTS.override.md` rule set; Kiro v1 accepts only review/verify. The result path
 must not exist. Consume the one stdout JSON object or the byte-identical result file, check the driver
 exit/status, and treat any preflight, schema, output, timeout, cancellation, or mutation failure as
 non-green. Claude, opencode, and Cursor are interactive-only and must not be selected for this ABI.
 
 Machine policy is fixed by provider and role: Codex uses native workspace-write/read-only with
-ephemeral ignored-config execution and no approvals; Grok uses an explicit workspace/read-only named
-sandbox with web/subagents/memory disabled and bounded turns; Kiro review/verify receives only
-`fs_read`, while build/phase is reported as permission-only unless the request supplies a matching
-external-confinement assertion. Kiro tool permissions are never filesystem-isolation proof.
+ephemeral ignored-config execution and no approvals, but it runs only after the coordinator approval
+binds and the driver injects the exact repository-root-to-cwd instruction chain. Native Codex AGENTS
+loading is set to zero using strictly preflighted config keys; `--ignore-rules` covers execpolicy
+`.rules`, not AGENTS guidance. Grok uses an explicit
+workspace/read-only named sandbox with web/subagents/memory disabled and bounded turns; Kiro v1
+review/verify receives only `fs_read`, and Kiro build/phase is rejected before launch. Kiro tool
+permissions are never filesystem-isolation proof. Claude, OpenCode, and Cursor remain interactive-only.
 
 ## Phase 4 — Verify and report
 

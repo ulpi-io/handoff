@@ -1,13 +1,13 @@
-# handoff v0.2
+# handoff v0.2.1
 
 `handoff` has two deliberately separate surfaces:
 
 - The compatible interactive helper delegates `build` and `review` to Codex, Grok, Kiro, Claude,
   opencode, or Cursor through the existing slash commands and `--provider/--verb/--prompt-file` CLI.
 - The v0.2 machine API gives an autonomous coordinator a strict, versioned, fail-closed subprocess
-  boundary for the hardened Codex, Grok, and Kiro adapters.
+  boundary with an explicit provider/role policy matrix.
 
-Both the Claude and Codex plugin manifests ship version `0.2.0` from this repository.
+Both the Claude and Codex plugin manifests ship version `0.2.1` from this repository.
 
 ## Interactive commands (compatible with v0.1)
 
@@ -50,9 +50,11 @@ node /absolute/path/to/handoff/scripts/handoff.mjs run \
 
 `capabilities --json` writes exactly one compact JSON object to stdout. It reports the API, driver,
 bundle digest, roles, static provider policies, installed provider versions, and flag preflight. A
-pipeline run refuses to start when the selected installed CLI cannot prove its required flags.
+pipeline run refuses to start when the selected installed CLI cannot prove its required flags and
+policy controls. Codex actively probes strict config-key recognition; Grok locally probes both named
+sandbox profiles and the structured-result parser without authentication or network.
 
-`run` accepts only `codex`, `grok`, or `kiro` and the roles `build`, `phase`, `review`, or `verify`.
+`run` accepts `codex` or `grok` for all four roles and Kiro v1 only for `review`/`verify`.
 Every flag is required. Unknown or duplicate flags fail closed. `--cwd`, `--request`, and `--result`
 must be absolute, lexically safe paths; symlink redirection and `.`/`..` traversal are rejected.
 The request must be a regular file. The result must not already exist and is reserved without
@@ -71,30 +73,43 @@ Unknown fields are rejected.
   "instructions": "Implement the bounded task and return strict structured evidence.",
   "timeoutMs": 600000,
   "model": "optional-provider-model",
-  "effort": "optional-provider-effort"
+  "effort": "optional-provider-effort",
+  "coordinatorApproval": {
+    "schemaVersion": "handoff.coordinator-approval.v0.2",
+    "approvalId": "approval-123",
+    "issuer": "autonomous-coordinator",
+    "provider": "codex",
+    "role": "build",
+    "cwd": "/the/same/canonical/cwd",
+    "scope": "all-applicable-agents-rules",
+    "subjectHash": "sha256:<canonical-approval-subject>",
+    "rules": []
+  }
 }
 ```
 
 `timeoutMs` is optional and bounded from 100 through 3,600,000 milliseconds. The request hash in the
 result is SHA-256 over the exact request-file bytes.
 
-Kiro can additionally receive an external-confinement assertion:
+`coordinatorApproval` is required for every Codex machine role and rejected for other providers. Its
+`subjectHash` is SHA-256 over the driver's canonical approval subject: approval id/issuer, provider,
+role, canonical cwd, scope, every request field except `coordinatorApproval`, and the ordered
+`source`/`path`/`sha256` rule identities. The driver recomputes that digest, so changing the task,
+role, cwd, or rules after approval fails before provider preflight. This approval-subject digest is
+separate from the result's exact request-file hash. Canonicalization is minified JSON with object keys
+sorted by raw UTF-8 bytes, array order preserved, integer decimal notation, JSON string escaping, and
+no Unicode normalization; the reference implementation is `codexApprovalSubjectHash` in
+`scripts/lib/agents-policy.mjs`.
 
-```json
-{
-  "externalConfinement": {
-    "schemaVersion": "handoff.external-confinement.v0.2",
-    "receiptId": "receipt-123",
-    "issuer": "coordinator-sandbox",
-    "policy": "workspace-write",
-    "cwd": "/the/same/canonical/cwd"
-  }
-}
-```
-
-For `review`/`verify`, the receipt policy must be `read-only`; for `build`/`phase`, it must be
-`workspace-write`. Handoff validates and reports the assertion but cannot independently authenticate
-its issuer (`verifiedByDriver: false`).
+Each rule contains `source` (`repository` or `external`), a safe path, exact `content`, and its
+`sha256` digest. Following Codex's instruction hierarchy, the driver checks only the repository-root
+to `cwd` directory chain, selects `AGENTS.override.md` before `AGENTS.md` at each level, skips empty
+files, rejects symlinks, and requires the repository entries to match that applicable chain exactly.
+Unrelated nested rules are not promoted to global rules. It then injects the complete approved JSON
+set—including coordinator-supplied external/global rules—before the task instructions. An empty list
+is valid only when no repository rule applies and the coordinator asserts no broader rule applies.
+External/global completeness and coordinator identity remain coordinator assertions under the
+documented same-UID threat model; the driver does not claim signature verification.
 
 ### Strict provider and result contracts
 
@@ -128,13 +143,15 @@ blocked regardless of the provider's self-report.
 
 | Provider | `build` / `phase` | `review` / `verify` | Other defaults |
 |---|---|---|---|
-| Codex | native `workspace-write` sandbox | native `read-only` sandbox | `exec --ephemeral`, `--ignore-user-config`, `--ignore-rules`, `approval_policy="never"`; never skip the Git-repository check or select a dangerous bypass |
+| Codex | native `workspace-write` sandbox; coordinator approval + exact `AGENTS.md` injection required | native `read-only` sandbox; the same approval/rule binding required | `exec --ephemeral --strict-config`; user config and execpolicy rules ignored; native AGENTS loading set to zero after strict config-key preflight; approvals and network disabled; never skip the Git-repository check or select a dangerous bypass |
 | Grok | named built-in `workspace` sandbox | named built-in `read-only` sandbox | cwd pinned, 12 turns, structured schema; web search, subagents, and memory disabled |
-| Kiro | `fs_read,fs_write,execute_bash` tool allowlist; reported as **permission-only** without an external receipt | `fs_read` only; no `execute_bash` | no native filesystem-isolation claim and never `--trust-all-tools` |
+| Kiro v1 | **unsupported and rejected before provider launch** | `fs_read` only; no `execute_bash`; permission-only | no native filesystem-isolation claim, no unverified confinement upgrade, and never `--trust-all-tools` |
 
-Claude, opencode, and Cursor remain fully available through the interactive helper but are explicitly
-advertised as `pipeline.safe: false`. Cursor review remains best-effort because its headless CLI has no
-native read-only lever.
+Claude, OpenCode, and Cursor remain fully available through the interactive helper but are explicitly
+advertised as `pipeline.safe: false` with concrete reasons. OpenCode plan/build are permission modes
+without verified filesystem confinement or a native strict-result channel. Cursor has no per-run
+read-only sandbox, its review is best-effort, and build uses `--force`. Claude's headless permission and
+configuration behavior has not been hardened for this ABI.
 
 Grok profile names describe repository policy, not a claim that every byte on the host is immutable:
 the built-in `workspace` profile can write the pinned cwd plus Grok state and temporary directories;

@@ -14,6 +14,7 @@ export const BUNDLE_FILES = Object.freeze([
   'contracts/v0.2/request.schema.json',
   'contracts/v0.2/result.schema.json',
   'scripts/handoff.mjs',
+  'scripts/lib/agents-policy.mjs',
   'scripts/lib/bundle.mjs',
   'scripts/lib/contracts.mjs',
   'scripts/lib/git.mjs',

@@ -41,32 +41,83 @@ export function invocation({ verb, cwd, model, mode, lastMsgFile, schemaFile }) 
 export const pipelineRoles = Object.freeze(['build', 'phase', 'review', 'verify']);
 
 export function pipelinePreflight(bin) {
-  return flagPreflight(bin, {
+  const flags = flagPreflight(bin, {
     helpArgs: ['exec', '--help'],
     requiredFlags: [
-      '--config', '--sandbox', '--cd', '--ephemeral', '--ignore-user-config', '--ignore-rules',
+      '--config', '--strict-config', '--sandbox', '--cd', '--ephemeral', '--ignore-user-config', '--ignore-rules',
       '--output-schema', '--output-last-message',
     ],
   });
+  if (!flags.ok) return flags;
+
+  // `--help` proves flags, but not whether this installed release recognizes the config keys that
+  // suppress native AGENTS loading and pin network/approval policy. Add one deliberately unknown
+  // key under --strict-config: a safe preflight must reject exactly that sentinel after accepting
+  // every preceding required key, before auth or network initialization.
+  const sentinel = 'handoff_capability_probe_unknown=true';
+  const probe = spawnSync(bin, [
+    'exec', '--strict-config', '--ignore-user-config',
+    ...CODEX_CONFIG_OVERRIDES.flatMap((value) => ['--config', value]),
+    '--config', sentinel,
+    '--ephemeral', '-',
+  ], {
+    input: '',
+    encoding: 'utf8',
+    timeout: 15_000,
+    maxBuffer: 1024 * 1024,
+    env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' },
+  });
+  const output = `${probe.stdout || ''}\n${probe.stderr || ''}`;
+  if (probe.error || probe.status === 0 || !output.includes('handoff_capability_probe_unknown')) {
+    return {
+      ok: false,
+      version: flags.version,
+      reason: `installed CLI cannot prove required strict config support${probe.error ? `: ${probe.error.message}` : ''}`,
+    };
+  }
+  return flags;
 }
 
-export function pipelinePolicy(role) {
+const CODEX_CONFIG_OVERRIDES = Object.freeze([
+  'approval_policy="never"',
+  'project_doc_max_bytes=0',
+  'project_doc_fallback_filenames=[]',
+  'project_root_markers=[".git"]',
+  'sandbox_workspace_write.network_access=false',
+]);
+
+export function pipelinePolicy(role, coordinatorApproval = null) {
   const sandbox = role === 'build' || role === 'phase' ? 'workspace-write' : 'read-only';
-  return {
+  const policy = {
     enforcement: 'native-filesystem-sandbox',
     filesystem: sandbox,
     approvals: 'never',
     ephemeral: true,
     userConfiguration: 'ignored',
-    projectRules: 'ignored',
+    projectRules: coordinatorApproval ? 'coordinator-approved-and-injected' : 'coordinator-approval-required',
+    nativeAgentsLoading: 'disabled-by-project_doc_max_bytes=0',
+    execPolicyRules: 'ignored',
+    network: 'blocked',
+    coordinatorApprovalRequired: true,
   };
+  if (coordinatorApproval) {
+    policy.coordinatorApprovalId = coordinatorApproval.approvalId;
+    policy.coordinatorApprovalIssuer = coordinatorApproval.issuer;
+    policy.coordinatorApprovalScope = coordinatorApproval.scope;
+    policy.coordinatorApprovalSubjectHash = coordinatorApproval.subjectHash;
+    policy.agentsRulesDigest = coordinatorApproval.rulesDigest;
+    policy.injectedAgentsRules = coordinatorApproval.rules.map((rule) => `${rule.source}:${rule.path}`);
+    policy.agentsRulesCompleteness = 'repository rules driver-verified; external/global applicability coordinator-asserted';
+  }
+  return policy;
 }
 
-export function pipelineInvocation({ bin, role, cwd, model, schemaFile, lastMsgFile }) {
-  const policy = pipelinePolicy(role);
+export function pipelineInvocation({ bin, role, cwd, model, schemaFile, lastMsgFile, coordinatorApproval }) {
+  if (!coordinatorApproval) throw new Error('Codex pipeline invocation requires coordinator approval binding');
+  const policy = pipelinePolicy(role, coordinatorApproval);
   const args = [
-    'exec', '--ephemeral', '--ignore-user-config', '--ignore-rules',
-    '--config', 'approval_policy="never"',
+    'exec', '--ephemeral', '--ignore-user-config', '--ignore-rules', '--strict-config',
+    ...CODEX_CONFIG_OVERRIDES.flatMap((value) => ['--config', value]),
     '--sandbox', policy.filesystem, '--cd', cwd,
     '--output-schema', schemaFile, '--output-last-message', lastMsgFile,
   ];

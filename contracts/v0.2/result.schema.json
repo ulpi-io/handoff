@@ -7,8 +7,8 @@
   "required": ["schemaVersion", "driverVersion", "bundleVersion", "bundleDigest", "provider", "role", "policy", "requestHash", "status", "exit", "output", "git", "timing", "usage", "diagnostics"],
   "properties": {
     "schemaVersion": { "const": "handoff.result.v0.2" },
-    "driverVersion": { "const": "0.2.0" },
-    "bundleVersion": { "const": "0.2.0" },
+    "driverVersion": { "const": "0.2.1" },
+    "bundleVersion": { "const": "0.2.1" },
     "bundleDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "provider": {
       "type": "object",
@@ -32,6 +32,16 @@
         "ephemeral": { "type": "boolean" },
         "userConfiguration": { "type": "string" },
         "projectRules": { "type": "string" },
+        "nativeAgentsLoading": { "type": "string" },
+        "execPolicyRules": { "type": "string" },
+        "coordinatorApprovalRequired": { "type": "boolean" },
+        "coordinatorApprovalId": { "type": "string" },
+        "coordinatorApprovalIssuer": { "type": "string" },
+        "coordinatorApprovalScope": { "type": "string" },
+        "coordinatorApprovalSubjectHash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "agentsRulesDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "injectedAgentsRules": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "agentsRulesCompleteness": { "type": "string" },
         "sandboxProfile": { "type": "string" },
         "permissionMode": { "type": "string" },
         "webSearch": { "type": "boolean" },
@@ -42,20 +52,7 @@
         "readScope": { "type": "string" },
         "writableLocations": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "nativeFilesystemIsolation": { "type": "boolean" },
-        "toolAllowlist": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-        "externalConfinement": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["schemaVersion", "receiptId", "issuer", "policy", "cwd", "verifiedByDriver"],
-          "properties": {
-            "schemaVersion": { "const": "handoff.external-confinement.v0.2" },
-            "receiptId": { "type": "string" },
-            "issuer": { "type": "string" },
-            "policy": { "enum": ["workspace-write", "read-only"] },
-            "cwd": { "type": "string" },
-            "verifiedByDriver": { "const": false }
-          }
-        }
+        "toolAllowlist": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
       }
     },
     "requestHash": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" },

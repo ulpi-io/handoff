@@ -47,7 +47,7 @@ export function capture({ code, stdout, stderr }) {
   return { ran: true, ok: code === 0, text: (stdout || '').trim(), stderr: (stderr || '').trim() };
 }
 
-export const pipelineRoles = Object.freeze(['build', 'phase', 'review', 'verify']);
+export const pipelineRoles = Object.freeze(['review', 'verify']);
 
 export function pipelinePreflight(bin) {
   return flagPreflight(bin, {
@@ -56,31 +56,18 @@ export function pipelinePreflight(bin) {
   });
 }
 
-export function pipelinePolicy(role, externalConfinement = null) {
-  const writable = role === 'build' || role === 'phase';
-  const base = {
+export function pipelinePolicy(role) {
+  if (!pipelineRoles.includes(role)) throw new Error(`Kiro pipeline role '${role}' is unsupported`);
+  return {
     enforcement: 'tool-permission-allowlist',
     filesystem: 'permission-only',
     nativeFilesystemIsolation: false,
-    toolAllowlist: writable ? ['fs_read', 'fs_write', 'execute_bash'] : ['fs_read'],
+    toolAllowlist: ['fs_read'],
   };
-  if (externalConfinement) {
-    base.enforcement = 'external-confinement-receipt-plus-tool-permission-allowlist';
-    base.filesystem = externalConfinement.policy;
-    base.externalConfinement = {
-      schemaVersion: externalConfinement.schemaVersion,
-      receiptId: externalConfinement.receiptId,
-      issuer: externalConfinement.issuer,
-      policy: externalConfinement.policy,
-      cwd: externalConfinement.cwd,
-      verifiedByDriver: false,
-    };
-  }
-  return base;
 }
 
-export function pipelineInvocation({ bin, role, model, effort, externalConfinement }) {
-  const policy = pipelinePolicy(role, externalConfinement);
+export function pipelineInvocation({ bin, role, model, effort }) {
+  const policy = pipelinePolicy(role);
   const args = ['chat', '--no-interactive', '--wrap', 'never', `--trust-tools=${trustFor(role)}`];
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);

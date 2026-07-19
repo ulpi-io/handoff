@@ -1,17 +1,22 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const DRIVER_VERSION = '0.2.0';
-export const BUNDLE_VERSION = '0.2.0';
+export const DRIVER_VERSION = '0.2.1';
+export const BUNDLE_VERSION = '0.2.1';
 export const CAPABILITIES_SCHEMA_VERSION = 'handoff.capabilities.v0.2';
 export const REQUEST_SCHEMA_VERSION = 'handoff.request.v0.2';
 export const PROVIDER_OUTPUT_SCHEMA_VERSION = 'handoff.provider-output.v0.2';
 export const RESULT_SCHEMA_VERSION = 'handoff.result.v0.2';
-export const EXTERNAL_CONFINEMENT_SCHEMA_VERSION = 'handoff.external-confinement.v0.2';
+export const COORDINATOR_APPROVAL_SCHEMA_VERSION = 'handoff.coordinator-approval.v0.2';
 export const ROLES = Object.freeze(['build', 'phase', 'review', 'verify']);
-export const PIPELINE_PROVIDERS = Object.freeze(['codex', 'grok', 'kiro']);
+export const PIPELINE_PROVIDER_ROLES = Object.freeze({
+  codex: Object.freeze(['build', 'phase', 'review', 'verify']),
+  grok: Object.freeze(['build', 'phase', 'review', 'verify']),
+  kiro: Object.freeze(['review', 'verify']),
+});
+export const PIPELINE_PROVIDERS = Object.freeze(Object.keys(PIPELINE_PROVIDER_ROLES));
 export const DEFAULT_TIMEOUT_MS = 600_000;
 export const MAX_REQUEST_BYTES = 2_000_000;
 export const MAX_PROVIDER_OUTPUT_BYTES = 256_000;
@@ -81,23 +86,76 @@ function safeRepoRelativePath(value, where) {
   return value;
 }
 
-function validateExternalConfinement(value) {
-  plainObject(value, 'request.externalConfinement');
+function safeExternalAbsolutePath(value, where) {
+  boundedString(value, where, 4096);
+  if (!isAbsolute(value)) throw new ContractError(`${where} must be absolute`);
+  if (/[\u0000-\u001f\u007f]/u.test(value)) throw new ContractError(`${where} contains control characters`);
+  if (sep === '/' && value.includes('\\')) throw new ContractError(`${where} contains an ambiguous path separator`);
+  const root = parse(value).root;
+  const rest = value.slice(root.length);
+  if (rest.split(sep).some((part) => part === '' || part === '.' || part === '..')) {
+    throw new ContractError(`${where} contains an unsafe path segment`);
+  }
+  if (resolve(value) !== value) throw new ContractError(`${where} must be lexically normalized`);
+  return value;
+}
+
+function isAgentsFilename(value) {
+  const normalized = value.replaceAll('\\', '/');
+  const name = normalized.slice(normalized.lastIndexOf('/') + 1);
+  return name === 'AGENTS.md' || name === 'AGENTS.override.md';
+}
+
+function validateCoordinatorApproval(value) {
+  plainObject(value, 'request.coordinatorApproval');
   exactKeys(
     value,
-    ['schemaVersion', 'receiptId', 'issuer', 'policy', 'cwd'],
-    ['schemaVersion', 'receiptId', 'issuer', 'policy', 'cwd'],
-    'request.externalConfinement',
+    ['schemaVersion', 'approvalId', 'issuer', 'provider', 'role', 'cwd', 'scope', 'subjectHash', 'rules'],
+    ['schemaVersion', 'approvalId', 'issuer', 'provider', 'role', 'cwd', 'scope', 'subjectHash', 'rules'],
+    'request.coordinatorApproval',
   );
-  if (value.schemaVersion !== EXTERNAL_CONFINEMENT_SCHEMA_VERSION) {
-    throw new ContractError(`request.externalConfinement.schemaVersion must be '${EXTERNAL_CONFINEMENT_SCHEMA_VERSION}'`);
+  if (value.schemaVersion !== COORDINATOR_APPROVAL_SCHEMA_VERSION) {
+    throw new ContractError(`request.coordinatorApproval.schemaVersion must be '${COORDINATOR_APPROVAL_SCHEMA_VERSION}'`);
   }
-  boundedString(value.receiptId, 'request.externalConfinement.receiptId', 256);
-  boundedString(value.issuer, 'request.externalConfinement.issuer', 256);
-  if (!['workspace-write', 'read-only'].includes(value.policy)) {
-    throw new ContractError('request.externalConfinement.policy must be workspace-write|read-only');
+  safeCliValue(value.approvalId, 'request.coordinatorApproval.approvalId', 256);
+  safeCliValue(value.issuer, 'request.coordinatorApproval.issuer', 256);
+  if (value.provider !== 'codex') throw new ContractError("request.coordinatorApproval.provider must be 'codex'");
+  if (!ROLES.includes(value.role)) throw new ContractError(`request.coordinatorApproval.role must be ${ROLES.join('|')}`);
+  boundedString(value.cwd, 'request.coordinatorApproval.cwd', 4096);
+  if (value.scope !== 'all-applicable-agents-rules') {
+    throw new ContractError("request.coordinatorApproval.scope must be 'all-applicable-agents-rules'");
   }
-  boundedString(value.cwd, 'request.externalConfinement.cwd', 4096);
+  if (typeof value.subjectHash !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(value.subjectHash)) {
+    throw new ContractError('request.coordinatorApproval.subjectHash must be a SHA-256 digest');
+  }
+  if (!Array.isArray(value.rules) || value.rules.length > 128) {
+    throw new ContractError('request.coordinatorApproval.rules must be an array with at most 128 entries');
+  }
+  let priorPath = null;
+  for (const [index, rule] of value.rules.entries()) {
+    plainObject(rule, `request.coordinatorApproval.rules[${index}]`);
+    exactKeys(rule, ['source', 'path', 'sha256', 'content'], ['source', 'path', 'sha256', 'content'], `request.coordinatorApproval.rules[${index}]`);
+    if (!['repository', 'external'].includes(rule.source)) {
+      throw new ContractError(`request.coordinatorApproval.rules[${index}].source must be repository|external`);
+    }
+    if (rule.source === 'repository') safeRepoRelativePath(rule.path, `request.coordinatorApproval.rules[${index}].path`);
+    else safeExternalAbsolutePath(rule.path, `request.coordinatorApproval.rules[${index}].path`);
+    if (!isAgentsFilename(rule.path)) {
+      throw new ContractError(`request.coordinatorApproval.rules[${index}].path must name AGENTS.md or AGENTS.override.md`);
+    }
+    const sortKey = `${rule.source}\0${rule.path}`;
+    if (priorPath !== null && Buffer.compare(Buffer.from(priorPath), Buffer.from(sortKey)) >= 0) {
+      throw new ContractError('request.coordinatorApproval.rules must be uniquely sorted by source and path');
+    }
+    priorPath = sortKey;
+    if (typeof rule.sha256 !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(rule.sha256)) {
+      throw new ContractError(`request.coordinatorApproval.rules[${index}].sha256 must be a SHA-256 digest`);
+    }
+    boundedString(rule.content, `request.coordinatorApproval.rules[${index}].content`, 256_000, { allowEmpty: true });
+    if (sha256(Buffer.from(rule.content)) !== rule.sha256) {
+      throw new ContractError(`request.coordinatorApproval.rules[${index}] content digest mismatch`);
+    }
+  }
 }
 
 export function parseMachineRequest(raw) {
@@ -110,7 +168,7 @@ export function parseMachineRequest(raw) {
   plainObject(value, 'request');
   exactKeys(
     value,
-    ['schemaVersion', 'instructions', 'timeoutMs', 'model', 'effort', 'externalConfinement'],
+    ['schemaVersion', 'instructions', 'timeoutMs', 'model', 'effort', 'coordinatorApproval'],
     ['schemaVersion', 'instructions'],
     'request',
   );
@@ -123,7 +181,7 @@ export function parseMachineRequest(raw) {
   }
   if (value.model !== undefined) safeCliValue(value.model, 'request.model', 256);
   if (value.effort !== undefined) safeCliValue(value.effort, 'request.effort', 64);
-  if (value.externalConfinement !== undefined) validateExternalConfinement(value.externalConfinement);
+  if (value.coordinatorApproval !== undefined) validateCoordinatorApproval(value.coordinatorApproval);
   return value;
 }
 

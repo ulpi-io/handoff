@@ -137,12 +137,21 @@ test('no adapter invocation ever uses --skip-git-repo-check', () => {
 test('pipeline adapters pin hardened policies and strict result channels', () => {
   const c = codex.pipelineInvocation({
     bin: '/fake/codex', role: 'phase', cwd: '/w', schemaFile: '/tmp/schema', lastMsgFile: '/tmp/result',
+    coordinatorApproval: {
+      approvalId: 'approval-1', issuer: 'coordinator', scope: 'all-applicable-agents-rules',
+      subjectHash: `sha256:${'a'.repeat(64)}`, rulesDigest: `sha256:${'b'.repeat(64)}`, rules: [],
+    },
   });
   assert.ok(c.args.includes('--ephemeral'));
   assert.ok(c.args.includes('--ignore-user-config'));
   assert.ok(c.args.includes('--ignore-rules'));
+  assert.ok(c.args.includes('--strict-config'));
   assert.ok(c.args.includes('workspace-write'));
   assert.ok(c.args.includes('approval_policy="never"'));
+  assert.ok(c.args.includes('project_doc_max_bytes=0'));
+  assert.ok(c.args.includes('project_doc_fallback_filenames=[]'));
+  assert.ok(c.args.includes('project_root_markers=[".git"]'));
+  assert.ok(c.args.includes('sandbox_workspace_write.network_access=false'));
   assert.ok(!c.args.includes('--skip-git-repo-check'));
   assert.ok(!c.args.includes('danger-full-access'));
 
@@ -156,6 +165,8 @@ test('pipeline adapters pin hardened policies and strict result channels', () =>
   assert.equal(g.args[g.args.indexOf('--max-turns') + 1], '12');
 
   const k = kiro.pipelineInvocation({ bin: '/fake/kiro', role: 'review' });
+  assert.deepEqual(kiro.pipelineRoles, ['review', 'verify']);
+  assert.throws(() => kiro.pipelineInvocation({ bin: '/fake/kiro', role: 'build' }), /unsupported/u);
   assert.ok(k.args.includes('--trust-tools=fs_read'));
   assert.ok(!k.args.some((arg) => arg.includes('execute_bash')));
   assert.equal(k.policy.filesystem, 'permission-only');

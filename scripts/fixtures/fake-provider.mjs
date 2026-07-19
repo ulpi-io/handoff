@@ -28,13 +28,30 @@ if (has('--help') || has('-h')) {
     process.exit(0);
   }
   process.stdout.write([
-    '--config --sandbox --cd --ephemeral --ignore-user-config --ignore-rules',
+    '--config --strict-config --sandbox --cd --ephemeral --ignore-user-config --ignore-rules',
     '--output-schema --output-last-message',
     '--cwd --disable-web-search --json-schema --max-turns --no-memory --no-subagents',
     '--permission-mode --prompt-file --verbatim',
     '--no-interactive --trust-tools --wrap',
   ].join('\n') + '\n');
   process.exit(0);
+}
+
+if (args.includes('handoff_capability_probe_unknown=true')) {
+  const field = process.env.HANDOFF_FAKE_MODE === 'config-missing'
+    ? 'project_doc_max_bytes'
+    : 'handoff_capability_probe_unknown';
+  process.stderr.write(`Error loading config.toml: unknown configuration field \`${field}\` in -c/--config override\n`);
+  process.exit(1);
+}
+
+if (args.includes('handoff-invalid-json')) {
+  if (process.env.HANDOFF_FAKE_MODE === 'sandbox-missing') {
+    process.stderr.write('warning: sandbox could not be applied; refusing to start\n');
+  } else {
+    process.stderr.write('Error: --json-schema: invalid JSON: expected value at line 1 column 1\n');
+  }
+  process.exit(1);
 }
 
 async function stdinText() {
@@ -47,6 +64,9 @@ let prompt = '';
 const promptFile = after('--prompt-file');
 if (promptFile) prompt = readFileSync(promptFile, 'utf8');
 else prompt = await stdinText();
+if (process.env.HANDOFF_FAKE_PROMPT_CAPTURE) {
+  writeFileSync(process.env.HANDOFF_FAKE_PROMPT_CAPTURE, prompt);
+}
 
 const role = prompt.match(/machine role '([^']+)'/u)?.[1] || 'review';
 const cwd = after('--cd') || after('--cwd') || process.cwd();

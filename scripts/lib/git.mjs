@@ -46,7 +46,7 @@ function checkedGit(cwd, args, label) {
   return result.out;
 }
 
-function repositoryRoot(cwd) {
+export function repositoryRoot(cwd) {
   const raw = checkedGit(cwd, ['rev-parse', '--show-toplevel'], 'git repository root');
   return raw.toString('utf8').replace(/[\r\n]+$/u, '');
 }

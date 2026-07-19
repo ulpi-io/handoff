@@ -11,16 +11,34 @@
     "timeoutMs": { "type": "integer", "minimum": 100, "maximum": 3600000 },
     "model": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^(?![-\\s])[^\\u0000-\\u001F\\u007F]*\\S$" },
     "effort": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^(?![-\\s])[^\\u0000-\\u001F\\u007F]*\\S$" },
-    "externalConfinement": {
+    "coordinatorApproval": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schemaVersion", "receiptId", "issuer", "policy", "cwd"],
+      "required": ["schemaVersion", "approvalId", "issuer", "provider", "role", "cwd", "scope", "subjectHash", "rules"],
       "properties": {
-        "schemaVersion": { "const": "handoff.external-confinement.v0.2" },
-        "receiptId": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "schemaVersion": { "const": "handoff.coordinator-approval.v0.2" },
+        "approvalId": { "type": "string", "minLength": 1, "maxLength": 256 },
         "issuer": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "policy": { "enum": ["workspace-write", "read-only"] },
-        "cwd": { "type": "string", "minLength": 1, "maxLength": 4096 }
+        "provider": { "const": "codex" },
+        "role": { "enum": ["build", "phase", "review", "verify"] },
+        "cwd": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "scope": { "const": "all-applicable-agents-rules" },
+        "subjectHash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "rules": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "path", "sha256", "content"],
+            "properties": {
+              "source": { "enum": ["repository", "external"] },
+              "path": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "(^|[\\\\/])(AGENTS|AGENTS\\.override)\\.md$" },
+              "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+              "content": { "type": "string", "maxLength": 256000 }
+            }
+          }
+        }
       }
     }
   }

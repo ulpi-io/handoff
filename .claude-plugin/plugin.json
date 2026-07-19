@@ -1,7 +1,7 @@
 {
   "name": "handoff",
-  "version": "0.2.0",
-  "description": "Hand off interactive build/review tasks to Codex, Grok, Kiro, Claude, opencode, or Cursor, plus a strict versioned machine API for hardened Codex, Grok, and Kiro pipeline runs. `/handoff:codex-build`, `/handoff:claude-review`, etc. Prompt bytes stay off argv and every machine result fails closed with Git evidence.",
+  "version": "0.2.1",
+  "description": "Hand off interactive build/review tasks to six providers, plus a strict machine API: coordinator-bound Codex and sandboxed Grok for all roles, Kiro v1 for review/verify only. Prompt bytes stay off argv and every machine result fails closed with Git evidence.",
   "author": {
     "name": "ulpi.io",
     "url": "https://github.com/ulpi-io"

@@ -19,6 +19,8 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { gitFingerprint } from './lib/git.mjs';
+import { codexApprovalSubjectHash, discoverAgentsRules } from './lib/agents-policy.mjs';
+import { sha256 } from './lib/contracts.mjs';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const DRIVER = resolve(scriptsDir, 'handoff.mjs');
@@ -58,15 +60,38 @@ function request(overrides = {}) {
   };
 }
 
+function coordinatorApproval(ctx, role, overrides = {}, requestValue = request(), cwd = ctx.repo) {
+  const approval = {
+    schemaVersion: 'handoff.coordinator-approval.v0.2',
+    approvalId: 'fake-coordinator-approval',
+    issuer: 'fake-coordinator',
+    provider: 'codex',
+    role,
+    cwd,
+    scope: 'all-applicable-agents-rules',
+    rules: discoverAgentsRules(cwd),
+    ...overrides,
+  };
+  if (!Object.hasOwn(overrides, 'subjectHash')) {
+    approval.subjectHash = codexApprovalSubjectHash({ request: requestValue, approval });
+  }
+  return approval;
+}
+
 function invoke(ctx, {
   provider = 'codex', role = 'review', mode = 'success', requestValue = request(),
-  resultName = `${provider}-${role}.json`, extraArgs = [], extraEnv = {},
+  resultName = `${provider}-${role}.json`, extraArgs = [], extraEnv = {}, autoCoordinatorApproval = true,
+  runCwd = ctx.repo,
 } = {}) {
   const requestPath = join(ctx.root, `${provider}-${role}-request.json`);
   const resultPath = join(ctx.root, resultName);
+  if (provider === 'codex' && autoCoordinatorApproval && requestValue && typeof requestValue === 'object'
+    && !Array.isArray(requestValue) && !Object.hasOwn(requestValue, 'coordinatorApproval')) {
+    requestValue = { ...requestValue, coordinatorApproval: coordinatorApproval(ctx, role, {}, requestValue, runCwd) };
+  }
   writeFileSync(requestPath, JSON.stringify(requestValue));
   const args = [
-    DRIVER, 'run', '--provider', provider, '--role', role, '--cwd', ctx.repo,
+    DRIVER, 'run', '--provider', provider, '--role', role, '--cwd', runCwd,
     '--request', requestPath, '--result', resultPath, ...extraArgs,
   ];
   const proc = spawnSync(process.execPath, args, {
@@ -109,6 +134,11 @@ for (const role of ['build', 'phase', 'review', 'verify']) {
       assert.equal(parsed.git.changed, role === 'build' || role === 'phase');
       assert.equal(parsed.usage.totalTokens, 18);
       assert.equal(parsed.policy.filesystem, role === 'build' || role === 'phase' ? 'workspace-write' : 'read-only');
+      assert.equal(parsed.policy.projectRules, 'coordinator-approved-and-injected');
+      assert.equal(parsed.policy.coordinatorApprovalRequired, true);
+      assert.match(parsed.policy.coordinatorApprovalSubjectHash, /^sha256:[0-9a-f]{64}$/u);
+      assert.equal(parsed.policy.nativeAgentsLoading, 'disabled-by-project_doc_max_bytes=0');
+      assert.equal(parsed.policy.execPolicyRules, 'ignored');
     } finally { cleanup(ctx); }
   });
 }
@@ -130,9 +160,18 @@ test('capabilities --json is a one-object fake-provider preflight with honest pi
       assert.equal(capability.pipeline.safe, true);
       assert.equal(capability.pipeline.preflight.ok, true);
     }
+    assert.deepEqual(parsed.providers.find((entry) => entry.id === 'codex').pipeline.roles, ['build', 'phase', 'review', 'verify']);
+    assert.equal(parsed.providers.find((entry) => entry.id === 'codex').pipeline.policies.build.coordinatorApprovalRequired, true);
+    assert.deepEqual(parsed.providers.find((entry) => entry.id === 'grok').pipeline.roles, ['build', 'phase', 'review', 'verify']);
+    assert.deepEqual(parsed.providers.find((entry) => entry.id === 'kiro').pipeline.roles, ['review', 'verify']);
+    assert.deepEqual(Object.keys(parsed.providers.find((entry) => entry.id === 'kiro').pipeline.policies), ['review', 'verify']);
     for (const provider of ['claude', 'opencode', 'cursor']) {
-      assert.equal(parsed.providers.find((entry) => entry.id === provider).pipeline.safe, false);
+      const capability = parsed.providers.find((entry) => entry.id === provider);
+      assert.equal(capability.pipeline.safe, false);
+      assert.match(capability.pipeline.reason, /interactive-only/u);
     }
+    assert.match(parsed.providers.find((entry) => entry.id === 'opencode').pipeline.reason, /without verified filesystem confinement/u);
+    assert.match(parsed.providers.find((entry) => entry.id === 'cursor').pipeline.reason, /no per-run read-only sandbox/u);
   } finally { cleanup(ctx); }
 });
 
@@ -224,30 +263,196 @@ test('untracked-only build changes are evidence and count as completion', () => 
   } finally { cleanup(ctx); }
 });
 
-test('Kiro build stays permission-only unless a matching external-confinement assertion is supplied', () => {
+test('Codex requires coordinator approval and injects every applicable AGENTS.md rule', () => {
   let ctx = setup();
   try {
-    let run = invoke(ctx, { provider: 'kiro', role: 'build' });
-    assert.equal(run.proc.status, 0);
-    assert.equal(run.parsed.policy.filesystem, 'permission-only');
-    assert.equal(run.parsed.policy.nativeFilesystemIsolation, false);
+    const marker = join(ctx.root, 'codex-provider-invoked');
+    const { proc, parsed } = invoke(ctx, {
+      role: 'review',
+      autoCoordinatorApproval: false,
+      extraEnv: { HANDOFF_FAKE_ANY_INVOKE_MARKER: marker },
+    });
+    assert.equal(proc.status, 5);
+    assert.equal(parsed.status, 'rejected');
+    assert.match(parsed.diagnostics.message, /require request\.coordinatorApproval/u);
+    assert.equal(existsSync(marker), false);
   } finally { cleanup(ctx); }
 
   ctx = setup();
   try {
+    mkdirSync(join(ctx.repo, 'nested'));
+    mkdirSync(join(ctx.repo, 'unrelated'));
+    writeFileSync(join(ctx.repo, 'AGENTS.md'), 'Shadowed root rule must not apply.\n');
+    writeFileSync(join(ctx.repo, 'AGENTS.override.md'), 'Root override binding rule.\n');
+    writeFileSync(join(ctx.repo, 'nested/AGENTS.md'), 'Nested binding rule.\n');
+    writeFileSync(join(ctx.repo, 'unrelated/AGENTS.md'), 'Unrelated rule must not apply.\n');
+    const runCwd = join(ctx.repo, 'nested');
+    const promptCapture = join(ctx.root, 'captured-codex-prompt.txt');
+    const externalContent = 'Global coordinator rule.\n';
+    const baseRequest = request();
     const requestValue = request({
-      externalConfinement: {
-        schemaVersion: 'handoff.external-confinement.v0.2',
-        receiptId: 'fake-receipt',
-        issuer: 'fake-coordinator',
-        policy: 'workspace-write',
-        cwd: ctx.repo,
-      },
+      coordinatorApproval: coordinatorApproval(ctx, 'review', {
+        rules: [
+          { source: 'external', path: '/coordinator/global/AGENTS.md', sha256: sha256(Buffer.from(externalContent)), content: externalContent },
+          ...discoverAgentsRules(runCwd),
+        ],
+      }, baseRequest, runCwd),
     });
-    const run = invoke(ctx, { provider: 'kiro', role: 'build', requestValue });
-    assert.equal(run.proc.status, 0);
-    assert.equal(run.parsed.policy.filesystem, 'workspace-write');
-    assert.equal(run.parsed.policy.externalConfinement.verifiedByDriver, false);
+    const { proc, parsed } = invoke(ctx, {
+      role: 'review',
+      requestValue,
+      autoCoordinatorApproval: false,
+      runCwd,
+      extraEnv: { HANDOFF_FAKE_PROMPT_CAPTURE: promptCapture },
+    });
+    assert.equal(proc.status, 0);
+    assert.deepEqual(parsed.policy.injectedAgentsRules, [
+      'external:/coordinator/global/AGENTS.md',
+      'repository:AGENTS.override.md',
+      'repository:nested/AGENTS.md',
+    ]);
+    assert.equal(parsed.policy.agentsRulesCompleteness, 'repository rules driver-verified; external/global applicability coordinator-asserted');
+    assert.match(parsed.policy.agentsRulesDigest, /^sha256:[0-9a-f]{64}$/u);
+    const prompt = readFileSync(promptCapture, 'utf8');
+    assert.match(prompt, /Root override binding rule/u);
+    assert.match(prompt, /Nested binding rule/u);
+    assert.match(prompt, /Global coordinator rule/u);
+    assert.doesNotMatch(prompt, /Shadowed root rule must not apply/u);
+    assert.doesNotMatch(prompt, /Unrelated rule must not apply/u);
+    assert.match(prompt, /handoff-approved-agents-rules-json/u);
+  } finally { cleanup(ctx); }
+});
+
+test('Codex rejects incomplete or stale coordinator AGENTS.md bindings before provider preflight', () => {
+  const ctx = setup();
+  try {
+    writeFileSync(join(ctx.repo, 'AGENTS.md'), 'Current rule.\n');
+    const marker = join(ctx.root, 'codex-provider-invoked');
+    const incomplete = request({ coordinatorApproval: coordinatorApproval(ctx, 'review', { rules: [] }) });
+    let run = invoke(ctx, {
+      role: 'review', requestValue: incomplete, autoCoordinatorApproval: false,
+      resultName: 'incomplete-binding-result.json', extraEnv: { HANDOFF_FAKE_ANY_INVOKE_MARKER: marker },
+    });
+    assert.equal(run.proc.status, 5);
+    assert.match(run.parsed.diagnostics.message, /does not contain every applicable/u);
+    assert.equal(existsSync(marker), false);
+
+    const approvedRequest = request();
+    const approved = coordinatorApproval(ctx, 'review', {}, approvedRequest);
+    run = invoke(ctx, {
+      role: 'review',
+      requestValue: { ...approvedRequest, instructions: 'Tampered after approval.', coordinatorApproval: approved },
+      autoCoordinatorApproval: false,
+      resultName: 'tampered-subject-result.json',
+      extraEnv: { HANDOFF_FAKE_ANY_INVOKE_MARKER: marker },
+    });
+    assert.equal(run.proc.status, 5);
+    assert.match(run.parsed.diagnostics.message, /subjectHash does not bind/u);
+    assert.equal(existsSync(marker), false);
+
+    const externalContent = 'Unsafe external path.\n';
+    const unsafePathApproval = coordinatorApproval(ctx, 'review', {
+      rules: [
+        {
+          source: 'external', path: '/coordinator/../global/AGENTS.md',
+          sha256: sha256(Buffer.from(externalContent)), content: externalContent,
+        },
+        ...discoverAgentsRules(ctx.repo),
+      ],
+    });
+    run = invoke(ctx, {
+      role: 'review',
+      requestValue: request({ coordinatorApproval: unsafePathApproval }),
+      autoCoordinatorApproval: false,
+      resultName: 'unsafe-external-rule-path-result.json',
+      extraEnv: { HANDOFF_FAKE_ANY_INVOKE_MARKER: marker },
+    });
+    assert.equal(run.proc.status, 5);
+    assert.match(run.parsed.diagnostics.message, /unsafe path segment/u);
+    assert.equal(existsSync(marker), false);
+
+    const staleRules = discoverAgentsRules(ctx.repo).map((rule) => ({ ...rule, content: 'Stale rule.\n' }));
+    run = invoke(ctx, {
+      role: 'review',
+      requestValue: request({ coordinatorApproval: coordinatorApproval(ctx, 'review', { rules: staleRules }) }),
+      autoCoordinatorApproval: false,
+      resultName: 'stale-binding-result.json',
+      extraEnv: { HANDOFF_FAKE_ANY_INVOKE_MARKER: marker },
+    });
+    assert.equal(run.proc.status, 5);
+    assert.match(run.parsed.diagnostics.message, /content digest mismatch/u);
+    assert.equal(existsSync(marker), false);
+
+    run = invoke(ctx, {
+      role: 'review',
+      requestValue: request({ coordinatorApproval: coordinatorApproval(ctx, 'build') }),
+      autoCoordinatorApproval: false,
+      resultName: 'wrong-role-binding-result.json',
+      extraEnv: { HANDOFF_FAKE_ANY_INVOKE_MARKER: marker },
+    });
+    assert.equal(run.proc.status, 5);
+    assert.match(run.parsed.diagnostics.message, /role does not match/u);
+    assert.equal(existsSync(marker), false);
+  } finally { cleanup(ctx); }
+});
+
+test('Kiro v1 rejects build/phase before request or provider execution', () => {
+  for (const role of ['build', 'phase']) {
+    const ctx = setup();
+    try {
+      const requestPath = join(ctx.root, `kiro-${role}-request.json`);
+      const resultPath = join(ctx.root, `kiro-${role}-result.json`);
+      const marker = join(ctx.root, `kiro-${role}-provider-invoked`);
+      writeFileSync(requestPath, JSON.stringify(request()));
+      const proc = spawnSync(process.execPath, [
+        DRIVER, 'run', '--provider', 'kiro', '--role', role, '--cwd', ctx.repo,
+        '--request', requestPath, '--result', resultPath,
+      ], {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${ctx.bin}:${process.env.PATH || ''}`, HANDOFF_FAKE_ANY_INVOKE_MARKER: marker },
+      });
+      assert.equal(proc.status, 5);
+      assert.match(JSON.parse(proc.stdout).diagnostics.message, /does not support pipeline role/u);
+      assert.equal(existsSync(marker), false);
+      assert.equal(existsSync(resultPath), false);
+    } finally { cleanup(ctx); }
+  }
+});
+
+test('non-Codex providers reject coordinator approval objects before provider preflight', () => {
+  for (const provider of ['grok', 'kiro']) {
+    const ctx = setup();
+    try {
+      const marker = join(ctx.root, `${provider}-approval-provider-invoked`);
+      const baseRequest = request();
+      const requestValue = {
+        ...baseRequest,
+        coordinatorApproval: coordinatorApproval(ctx, 'review', {}, baseRequest),
+      };
+      const run = invoke(ctx, {
+        provider, role: 'review', requestValue,
+        resultName: `${provider}-coordinator-approval-result.json`,
+        extraEnv: { HANDOFF_FAKE_ANY_INVOKE_MARKER: marker },
+      });
+      assert.equal(run.proc.status, 5);
+      assert.match(run.parsed.diagnostics.message, /valid only for Codex/u);
+      assert.equal(existsSync(marker), false);
+    } finally { cleanup(ctx); }
+  }
+});
+
+test('Kiro v1 cannot be upgraded by an unverified confinement receipt', () => {
+  const ctx = setup();
+  try {
+    const marker = join(ctx.root, 'kiro-provider-invoked');
+    const run = invoke(ctx, {
+      provider: 'kiro', role: 'review',
+      requestValue: { ...request(), externalConfinement: { verifiedByDriver: false } },
+      extraEnv: { HANDOFF_FAKE_ANY_INVOKE_MARKER: marker },
+    });
+    assert.equal(run.proc.status, 5);
+    assert.match(run.parsed.diagnostics.message, /unknown field.*externalConfinement/u);
+    assert.equal(existsSync(marker), false);
   } finally { cleanup(ctx); }
 });
 
@@ -313,6 +518,26 @@ test('installed provider missing required flags fails capability preflight', () 
   } finally { cleanup(ctx); }
 });
 
+test('installed Codex missing required strict config support fails capability preflight', () => {
+  const ctx = setup();
+  try {
+    const { proc, parsed } = invoke(ctx, { role: 'review', mode: 'config-missing' });
+    assert.equal(proc.status, 3);
+    assert.equal(parsed.status, 'not_run');
+    assert.match(parsed.diagnostics.message, /cannot prove required strict config support/u);
+  } finally { cleanup(ctx); }
+});
+
+test('installed Grok unable to initialize a named sandbox fails capability preflight', () => {
+  const ctx = setup();
+  try {
+    const { proc, parsed } = invoke(ctx, { provider: 'grok', role: 'review', mode: 'sandbox-missing' });
+    assert.equal(proc.status, 3);
+    assert.equal(parsed.status, 'not_run');
+    assert.match(parsed.diagnostics.message, /cannot prove 'workspace' sandbox plus structured-result enforcement/u);
+  } finally { cleanup(ctx); }
+});
+
 test('timeout kills the subprocess and produces a normalized timed_out result', () => {
   const ctx = setup();
   try {
@@ -329,7 +554,9 @@ test('SIGTERM cancellation is normalized and still writes --result', async () =>
     const requestPath = join(ctx.root, 'cancel-request.json');
     const resultPath = join(ctx.root, 'cancel-result.json');
     const readyPath = join(ctx.root, 'provider-ready');
-    writeFileSync(requestPath, JSON.stringify(request({ timeoutMs: 5_000 })));
+    const requestValue = request({ timeoutMs: 5_000 });
+    requestValue.coordinatorApproval = coordinatorApproval(ctx, 'review', {}, requestValue);
+    writeFileSync(requestPath, JSON.stringify(requestValue));
     const child = spawn(process.execPath, [
       DRIVER, 'run', '--provider', 'codex', '--role', 'review', '--cwd', ctx.repo,
       '--request', requestPath, '--result', resultPath,
