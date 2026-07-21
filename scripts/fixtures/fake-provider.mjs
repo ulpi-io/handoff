@@ -36,7 +36,7 @@ if (has('--help') || has('-h')) {
   }
   const help = {
     codex: '--config --strict-config --sandbox --cd --ephemeral --ignore-user-config --ignore-rules --output-schema --output-last-message',
-    grok: '--cwd --disable-web-search --json-schema --max-turns --no-memory --no-subagents --permission-mode --prompt-file --sandbox --verbatim',
+    grok: '--allow --cwd --deny --disable-web-search --json-schema --max-turns --no-memory --no-plan --no-subagents --permission-mode --prompt-file --sandbox --tools --verbatim',
     'kiro-cli': '--no-interactive --trust-tools --wrap',
     claude: '--allowedTools --bare --disable-slash-commands --json-schema --mcp-config --no-chrome --no-session-persistence --output-format --permission-mode --safe-mode --settings --strict-mcp-config --tools',
     opencode: args.includes('run') ? '--agent --dir --format' : '--pure',
@@ -148,6 +148,53 @@ if (mode === 'runtime-sandbox-missing') {
 }
 
 function providerStdout() {
+  if (executable === 'grok') {
+    if (mode === 'grok-legacy-direct') return serialized;
+    let structuredOutput;
+    try { structuredOutput = JSON.parse(serialized); }
+    catch { structuredOutput = null; }
+    if (mode === 'grok-envelope-missing') structuredOutput = null;
+    const envelopeValue = {
+      text: serialized,
+      stopReason: 'EndTurn',
+      sessionId: 'fake-grok-session',
+      requestId: 'fake-grok-request',
+      thought: null,
+      num_turns: 7,
+      usage: {
+        input_tokens: 11,
+        cache_read_input_tokens: 3,
+        output_tokens: 7,
+        total_tokens: 21,
+      },
+      total_cost_usd: 0.001,
+      total_cost_usd_ticks: 10_000_000,
+      modelUsage: {
+        'fake-grok': {
+          inputTokens: 11,
+          cacheReadInputTokens: 3,
+          outputTokens: 7,
+          modelCalls: 7,
+        },
+      },
+      structuredOutput,
+      structuredOutputError: mode === 'grok-envelope-error'
+        ? 'model did not produce structured output'
+        : null,
+    };
+    if (mode === 'grok-envelope-metadata-drift') {
+      delete envelopeValue.stopReason;
+      delete envelopeValue.sessionId;
+      envelopeValue.requestId = null;
+      envelopeValue.num_turns = '7';
+    }
+    if (mode === 'grok-envelope-empty') {
+      envelopeValue.text = '';
+      envelopeValue.structuredOutput = null;
+    }
+    const envelope = JSON.stringify(envelopeValue);
+    return mode === 'noisy' ? `provider noise\n${envelope}` : envelope;
+  }
   if (executable === 'claude') {
     let structuredOutput;
     try { structuredOutput = JSON.parse(serialized); }

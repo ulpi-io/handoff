@@ -1,11 +1,11 @@
 ---
 name: handoff-run
 description: |
-  Strict frontend for every /handoff:<provider>-<role> command. Prepare a versioned request file and
+  Strict frontend for every Handoff provider-role command. Prepare a versioned request file and
   invoke the one machine driver for Codex, Grok, Kiro, Claude, OpenCode, or Cursor. Use when the user
-  asks to hand off or delegate a bounded build or review. Never invoke a provider directly.
+  asks to hand off or delegate a bounded build, phase, review, or verification. Never invoke a
+  provider directly.
 allowed-tools: [Bash, Read, Write, Grep, Glob]
-argument-hint: "<provider> <build|review> — <bounded request>"
 ---
 
 # handoff-run
@@ -21,7 +21,8 @@ Every slash command is a frontend to the same strict file ABI. There is no secon
 - One bounded request per run.
 </EXTREMELY-IMPORTANT>
 
-Inputs are a provider, role, absolute Git worktree, and user request. Supported roles are:
+Inputs are a provider, role, absolute Git worktree, user request, an optional native turn budget,
+and an explicit Grok web-search decision. Supported roles are:
 
 - Codex, Grok, Claude, OpenCode, Cursor: `build|phase|review|verify`
 - Kiro: `review|verify`
@@ -31,6 +32,15 @@ Inputs are a provider, role, absolute Git worktree, and user request. Supported 
 Create a self-contained instruction document with a one-sentence goal, exact in-scope paths,
 machine-checkable acceptance criteria, and guardrails. Reviews explicitly forbid changes and request
 concrete findings. Do not weaken or reinterpret the user's constraints.
+
+For Grok and Claude, select `maxTurns` from 1 through 100 when the task needs a budget other than the
+12-turn default. An explicit user-provided budget wins. Use a larger value for scope that cannot
+realistically complete in 12 provider turns; do not shrink the task merely to preserve the default.
+Do not set `maxTurns` for providers without a native turn control.
+
+For Grok, set `webSearch` to true only when the task needs current external references or the user
+explicitly asks for web research. It defaults to false. Do not enable it speculatively, and do not
+set it for providers without Handoff's native web-search control.
 
 ## 2. Prepare the versioned request
 
@@ -45,8 +55,12 @@ node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/prepare-request.mjs" \
   --request <absolute-temp-dir>/request.json
 ```
 
-The request helper validates the same schema as the driver. For Codex it also binds the exact request,
-role, cwd, and applicable AGENTS.md chain into a coordinator approval. The request path must not exist.
+For Grok and Claude, add `--max-turns <1-100>` before `--request` when selecting a non-default budget.
+The request helper validates the same schema as the driver and stores that budget in the hashed
+request; omission preserves the 12-turn default. For Codex it also binds the exact request, role,
+cwd, and applicable AGENTS.md chain into a coordinator approval. The request path must not exist.
+For Grok, add `--web-search true` when the scoped task requires web sources; explicit false or
+omission keeps WebSearch and WebFetch unavailable.
 
 ## 3. Invoke the one driver
 
@@ -75,10 +89,12 @@ Delete only the exact temporary directory created for this run after the result 
 
 - Codex: ephemeral, user config and native rules disabled, coordinator-approved AGENTS.md injected,
   approval policy never, native `workspace-write` for build/phase and `read-only` for review/verify.
-- Grok: exact `workspace` or `read-only` named sandbox, cwd pinned, bounded turns, and web search,
-  subagents, and memory disabled.
-- Claude: bare and safe modes, no persistence, strict empty MCP config, bounded turns, JSON Schema
-  output, explicit tools, and fail-closed native Bash sandboxing for write roles.
+- Grok: exact `workspace` or `read-only` named sandbox, cwd pinned, orchestrator-selected 1–100 turns
+  (default 12), current JSON-envelope normalization, orchestrator-controlled web search (default
+  off), and subagents and memory disabled.
+- Claude: bare and safe modes, no persistence, strict empty MCP config, orchestrator-selected 1–100
+  turns (default 12), JSON Schema output, explicit tools, and fail-closed native Bash sandboxing for
+  write roles.
 - OpenCode: temporary HOME/config roots, project configuration disabled, external plugins and skills
   disabled, an exact resolved named-agent permission preflight, raw-event normalization, and no Bash,
   web, subagents, or external-directory access. This is tool-permission confinement, not an OS sandbox.

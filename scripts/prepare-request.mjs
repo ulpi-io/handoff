@@ -8,6 +8,8 @@ import { readFileSync, rmSync } from 'node:fs';
 import { codexApprovalSubjectHash, discoverCoordinatorAgentsRules } from './lib/agents-policy.mjs';
 import {
   COORDINATOR_APPROVAL_SCHEMA_VERSION,
+  MAX_TURNS_PROVIDERS,
+  WEB_SEARCH_PROVIDERS,
   PIPELINE_PROVIDER_ROLES,
   REQUEST_SCHEMA_VERSION,
   decodeUtf8,
@@ -24,7 +26,7 @@ import {
 
 function parseArgs(argv) {
   const result = {};
-  const allowed = new Set(['--provider', '--role', '--cwd', '--instructions', '--request', '--timeout-ms', '--model', '--effort']);
+  const allowed = new Set(['--provider', '--role', '--cwd', '--instructions', '--request', '--timeout-ms', '--max-turns', '--web-search', '--model', '--effort']);
   for (let index = 0; index < argv.length; index += 2) {
     const flag = argv[index];
     if (!allowed.has(flag)) throw new Error(`unknown argument: ${flag}`);
@@ -45,6 +47,15 @@ function prepare(options) {
   if (!roles.includes(options.role)) {
     throw new Error(`--provider ${options.provider} does not support role ${options.role}; allowed roles: ${roles.join('|')}`);
   }
+  if (options.max_turns !== undefined && !MAX_TURNS_PROVIDERS.includes(options.provider)) {
+    throw new Error(`--max-turns is supported only for ${MAX_TURNS_PROVIDERS.join('|')}`);
+  }
+  if (options.web_search !== undefined && !WEB_SEARCH_PROVIDERS.includes(options.provider)) {
+    throw new Error(`--web-search is supported only for ${WEB_SEARCH_PROVIDERS.join('|')}`);
+  }
+  if (options.web_search !== undefined && !['true', 'false'].includes(options.web_search)) {
+    throw new Error('--web-search must be true|false');
+  }
   const cwd = safeCwd(options.cwd);
   const instructionsPath = safeRequestPath(options.instructions);
   const reservation = reserveResultPath(options.request);
@@ -54,6 +65,8 @@ function prepare(options) {
       instructions: decodeUtf8(readFileSync(instructionsPath), 'instructions file'),
     };
     if (options.timeout_ms !== undefined) request.timeoutMs = Number(options.timeout_ms);
+    if (options.max_turns !== undefined) request.maxTurns = Number(options.max_turns);
+    if (options.web_search !== undefined) request.webSearch = options.web_search === 'true';
     if (options.model !== undefined) request.model = options.model;
     if (options.effort !== undefined) request.effort = options.effort;
     if (options.provider === 'codex') {

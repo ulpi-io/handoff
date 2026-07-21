@@ -4,8 +4,8 @@ import { dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TextDecoder } from 'node:util';
 
-export const DRIVER_VERSION = '0.3.0';
-export const BUNDLE_VERSION = '0.3.0';
+export const DRIVER_VERSION = '0.3.1';
+export const BUNDLE_VERSION = '0.3.1';
 export const CAPABILITIES_SCHEMA_VERSION = 'handoff.capabilities.v0.2';
 export const REQUEST_SCHEMA_VERSION = 'handoff.request.v0.2';
 export const PROVIDER_OUTPUT_SCHEMA_VERSION = 'handoff.provider-output.v0.2';
@@ -22,6 +22,11 @@ export const PIPELINE_PROVIDER_ROLES = Object.freeze({
 });
 export const PIPELINE_PROVIDERS = Object.freeze(Object.keys(PIPELINE_PROVIDER_ROLES));
 export const DEFAULT_TIMEOUT_MS = 600_000;
+export const DEFAULT_MAX_TURNS = 12;
+export const MIN_MAX_TURNS = 1;
+export const MAX_MAX_TURNS = 100;
+export const MAX_TURNS_PROVIDERS = Object.freeze(['grok', 'claude']);
+export const WEB_SEARCH_PROVIDERS = Object.freeze(['grok']);
 export const MAX_REQUEST_BYTES = 2_000_000;
 export const MAX_PROVIDER_OUTPUT_BYTES = 256_000;
 export const MAX_CAPTURE_BYTES = 1_048_576;
@@ -179,7 +184,7 @@ export function parseMachineRequest(raw) {
   plainObject(value, 'request');
   exactKeys(
     value,
-    ['schemaVersion', 'instructions', 'timeoutMs', 'model', 'effort', 'coordinatorApproval'],
+    ['schemaVersion', 'instructions', 'timeoutMs', 'maxTurns', 'webSearch', 'model', 'effort', 'coordinatorApproval'],
     ['schemaVersion', 'instructions'],
     'request',
   );
@@ -189,6 +194,12 @@ export function parseMachineRequest(raw) {
   boundedString(value.instructions, 'request.instructions', MAX_REQUEST_BYTES);
   if (value.timeoutMs !== undefined && (!Number.isInteger(value.timeoutMs) || value.timeoutMs < 100 || value.timeoutMs > 3_600_000)) {
     throw new ContractError('request.timeoutMs must be an integer from 100 through 3600000');
+  }
+  if (value.maxTurns !== undefined && (!Number.isInteger(value.maxTurns) || value.maxTurns < MIN_MAX_TURNS || value.maxTurns > MAX_MAX_TURNS)) {
+    throw new ContractError(`request.maxTurns must be an integer from ${MIN_MAX_TURNS} through ${MAX_MAX_TURNS}`);
+  }
+  if (value.webSearch !== undefined && typeof value.webSearch !== 'boolean') {
+    throw new ContractError('request.webSearch must be a boolean');
   }
   if (value.model !== undefined) safeCliValue(value.model, 'request.model', 256);
   if (value.effort !== undefined) safeCliValue(value.effort, 'request.effort', 64);

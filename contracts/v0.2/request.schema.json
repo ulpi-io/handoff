@@ -9,6 +9,8 @@
     "schemaVersion": { "const": "handoff.request.v0.2" },
     "instructions": { "type": "string", "minLength": 1, "maxLength": 2000000 },
     "timeoutMs": { "type": "integer", "minimum": 100, "maximum": 3600000 },
+    "maxTurns": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "webSearch": { "type": "boolean" },
     "model": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^(?![-\\s])[^\\u0000-\\u001F\\u007F]*\\S$" },
     "effort": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^(?![-\\s])[^\\u0000-\\u001F\\u007F]*\\S$" },
     "coordinatorApproval": {

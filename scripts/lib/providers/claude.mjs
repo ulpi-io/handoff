@@ -1,6 +1,12 @@
 import { spawnSync } from 'node:child_process';
 
-import { ContractError, decodeUtf8 } from '../contracts.mjs';
+import {
+  ContractError,
+  DEFAULT_MAX_TURNS,
+  MAX_MAX_TURNS,
+  MIN_MAX_TURNS,
+  decodeUtf8,
+} from '../contracts.mjs';
 import { flagPreflight } from '../provider-preflight.mjs';
 import { locateExecutable } from '../which.mjs';
 
@@ -9,7 +15,6 @@ export const displayName = 'Claude';
 export const installHint = 'Install Claude Code (`npm i -g @anthropic-ai/claude-code`) and provide non-interactive authentication.';
 export const pipelineRoles = Object.freeze(['build', 'phase', 'review', 'verify']);
 
-const MAX_TURNS = 12;
 const EMPTY_MCP = JSON.stringify({ mcpServers: {} });
 const BUILD_TOOLS = Object.freeze(['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write']);
 const REVIEW_TOOLS = Object.freeze(['Glob', 'Grep', 'Read']);
@@ -77,7 +82,7 @@ export function pipelinePreflight(bin) {
   return flags;
 }
 
-export function pipelinePolicy(role) {
+export function pipelinePolicy(role, maxTurns = DEFAULT_MAX_TURNS) {
   const canWrite = writable(role);
   return {
     enforcement: canWrite ? 'native-bash-sandbox-plus-file-tool-permissions' : 'read-only-tool-allowlist',
@@ -96,21 +101,24 @@ export function pipelinePolicy(role) {
     webSearch: false,
     subagents: false,
     memory: false,
-    maxTurns: MAX_TURNS,
+    maxTurns,
+    maxTurnsConfigurable: true,
+    maxTurnsMinimum: MIN_MAX_TURNS,
+    maxTurnsMaximum: MAX_MAX_TURNS,
     network: canWrite ? 'Bash child network denied unless managed policy permits domains; provider API remains reachable' : 'no network-capable tool exposed',
     structuredResult: 'native JSON Schema in Claude JSON envelope',
   };
 }
 
-export function pipelineInvocation({ bin, role, model, effort, schemaJson }) {
-  const policy = pipelinePolicy(role);
+export function pipelineInvocation({ bin, role, model, effort, schemaJson, maxTurns }) {
+  const policy = pipelinePolicy(role, maxTurns ?? DEFAULT_MAX_TURNS);
   const tools = policy.toolAllowlist.join(',');
   const args = [
     '--bare', '--safe-mode', '--settings', settingsJson(),
     '--strict-mcp-config', '--mcp-config', EMPTY_MCP,
     '--disable-slash-commands', '--no-session-persistence', '--no-chrome',
     '--permission-mode', 'dontAsk', '--tools', tools, '--allowedTools', tools,
-    '--max-turns', String(MAX_TURNS), '-p', '--output-format', 'json', '--json-schema', schemaJson,
+    '--max-turns', String(policy.maxTurns), '-p', '--output-format', 'json', '--json-schema', schemaJson,
   ];
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);

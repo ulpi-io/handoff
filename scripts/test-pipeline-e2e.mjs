@@ -171,6 +171,15 @@ test('capabilities --json preflights every advertised provider through one stric
     assert.deepEqual(parsed.providers.find((entry) => entry.id === 'codex').pipeline.roles, ['build', 'phase', 'review', 'verify']);
     assert.equal(parsed.providers.find((entry) => entry.id === 'codex').pipeline.policies.build.coordinatorApprovalRequired, true);
     assert.deepEqual(parsed.providers.find((entry) => entry.id === 'grok').pipeline.roles, ['build', 'phase', 'review', 'verify']);
+    assert.equal(parsed.providers.find((entry) => entry.id === 'grok').pipeline.policies.review.webSearch, false);
+    assert.equal(parsed.providers.find((entry) => entry.id === 'grok').pipeline.policies.review.webSearchConfigurable, true);
+    for (const provider of ['grok', 'claude']) {
+      const policy = parsed.providers.find((entry) => entry.id === provider).pipeline.policies.review;
+      assert.equal(policy.maxTurns, 12);
+      assert.equal(policy.maxTurnsConfigurable, true);
+      assert.equal(policy.maxTurnsMinimum, 1);
+      assert.equal(policy.maxTurnsMaximum, 100);
+    }
     assert.deepEqual(parsed.providers.find((entry) => entry.id === 'kiro').pipeline.roles, ['review', 'verify']);
     assert.deepEqual(Object.keys(parsed.providers.find((entry) => entry.id === 'kiro').pipeline.policies), ['review', 'verify']);
     for (const provider of ['claude', 'cursor', 'opencode']) {
@@ -207,6 +216,11 @@ for (const [provider, roles] of Object.entries(STRICT_ROLE_MATRIX)) {
         if (provider === 'grok') {
           assert.equal(parsed.policy.sandboxProfile, role === 'build' || role === 'phase' ? 'workspace' : 'read-only');
           assert.equal(parsed.policy.webSearch, false);
+          assert.equal(parsed.usage.source, 'provider-envelope');
+          assert.deepEqual(
+            { inputTokens: parsed.usage.inputTokens, outputTokens: parsed.usage.outputTokens, totalTokens: parsed.usage.totalTokens },
+            { inputTokens: 14, outputTokens: 7, totalTokens: 21 },
+          );
         }
         if (provider === 'kiro') {
           assert.deepEqual(parsed.policy.toolAllowlist, ['fs_read']);
@@ -260,6 +274,7 @@ test('strict adapters launch only their pinned control surfaces', () => {
         assert.equal(settings.sandbox.enabled, true);
         assert.equal(settings.sandbox.failIfUnavailable, true);
         assert.equal(settings.sandbox.allowUnsandboxedCommands, false);
+        assert.equal(valueAfter(args, '--max-turns'), '12');
         const tools = valueAfter(args, '--tools').split(',');
         assert.equal(tools.includes('Bash'), role === 'build');
         assert.equal(tools.includes('Edit'), role === 'build');
@@ -274,8 +289,17 @@ test('strict adapters launch only their pinned control surfaces', () => {
       }
       if (provider === 'grok') {
         assert.equal(valueAfter(args, '--sandbox'), role === 'build' ? 'workspace' : 'read-only');
-        assert.equal(valueAfter(args, '--permission-mode'), role === 'build' ? 'auto' : 'plan');
-        for (const flag of ['--disable-web-search', '--no-subagents', '--no-memory', '--json-schema']) {
+        assert.equal(valueAfter(args, '--permission-mode'), role === 'build' ? 'auto' : 'dontAsk');
+        assert.equal(valueAfter(args, '--max-turns'), '12');
+        assert.equal(args.includes('--tools'), role === 'review');
+        assert.equal(args.includes('--deny'), role === 'review');
+        if (role === 'review') {
+          assert.equal(valueAfter(args, '--tools'), 'Read,Grep');
+          for (const rule of ['Bash(*)', 'Edit(*)', 'MCPTool(*)', 'WebFetch(*)']) {
+            assert.equal(args.some((value, index) => value === rule && args[index - 1] === '--deny'), true);
+          }
+        }
+        for (const flag of ['--disable-web-search', '--no-plan', '--no-subagents', '--no-memory', '--json-schema']) {
           assert.equal(args.includes(flag), true, `Grok omitted ${flag}`);
         }
       }
@@ -301,6 +325,48 @@ test('strict adapters launch only their pinned control surfaces', () => {
       }
     } finally { cleanup(ctx); }
   }
+});
+
+test('the orchestrator selects a bounded native turn budget for Grok and Claude', () => {
+  for (const provider of ['grok', 'claude']) {
+    const ctx = setup();
+    try {
+      const capture = join(ctx.root, `${provider}-custom-turn-budget.json`);
+      const { proc, parsed } = invoke(ctx, {
+        provider,
+        role: 'review',
+        requestValue: request({ maxTurns: 37 }),
+        extraEnv: { HANDOFF_FAKE_INVOCATION_CAPTURE: capture },
+      });
+      assert.equal(proc.status, 0, parsed.diagnostics.message);
+      assert.equal(parsed.policy.maxTurns, 37);
+      assert.equal(parsed.policy.maxTurnsConfigurable, true);
+      const observed = JSON.parse(readFileSync(capture, 'utf8'));
+      assert.equal(valueAfter(observed.args, '--max-turns'), '37');
+    } finally { cleanup(ctx); }
+  }
+});
+
+test('the orchestrator explicitly enables Grok web search and fetch tools', () => {
+  const ctx = setup();
+  try {
+    const capture = join(ctx.root, 'grok-web-search.json');
+    const { proc, parsed } = invoke(ctx, {
+      provider: 'grok',
+      role: 'review',
+      requestValue: request({ webSearch: true }),
+      extraEnv: { HANDOFF_FAKE_INVOCATION_CAPTURE: capture },
+    });
+    assert.equal(proc.status, 0, parsed.diagnostics.message);
+    assert.equal(parsed.policy.webSearch, true);
+    assert.equal(parsed.policy.webSearchConfigurable, true);
+    assert.deepEqual(parsed.policy.toolAllowlist, ['Read', 'Grep', 'WebSearch', 'WebFetch']);
+    assert.deepEqual(parsed.policy.toolDenylist, ['Bash(*)', 'Edit(*)', 'MCPTool(*)']);
+    const observed = JSON.parse(readFileSync(capture, 'utf8'));
+    assert.equal(observed.args.includes('--disable-web-search'), false);
+    assert.equal(valueAfter(observed.args, '--tools'), 'Read,Grep,WebSearch,WebFetch');
+    assert.equal(observed.args.some((value, index) => value === 'WebFetch(*)' && observed.args[index - 1] === '--allow'), true);
+  } finally { cleanup(ctx); }
 });
 
 test('removed provider/verb interface fails as one machine rejection object', () => {
@@ -361,6 +427,80 @@ test('prepare-request creates the strict file contract and binds Codex repositor
     assert.deepEqual(value.coordinatorApproval.rules.map((rule) => rule.source), ['external', 'repository']);
     assert.match(value.coordinatorApproval.subjectHash, /^sha256:[0-9a-f]{64}$/u);
   } finally { cleanup(ctx); }
+});
+
+test('prepare-request writes an orchestrator-selected Grok turn budget', () => {
+  const ctx = setup();
+  try {
+    const instructions = join(ctx.root, 'grok-instructions.txt');
+    const requestPath = join(ctx.root, 'grok-prepared-request.json');
+    writeFileSync(instructions, 'Review the bounded fake change.\n');
+    const proc = spawnSync(process.execPath, [
+      PREPARE, '--provider', 'grok', '--role', 'review', '--cwd', ctx.repo,
+      '--instructions', instructions, '--request', requestPath, '--max-turns', '37',
+    ], { encoding: 'utf8' });
+    assert.equal(proc.status, 0, proc.stderr);
+    assert.equal(JSON.parse(readFileSync(requestPath, 'utf8')).maxTurns, 37);
+  } finally { cleanup(ctx); }
+});
+
+test('prepare-request writes an explicit Grok web-search decision', () => {
+  for (const value of ['true', 'false']) {
+    const ctx = setup();
+    try {
+      const instructions = join(ctx.root, `grok-web-${value}-instructions.txt`);
+      const requestPath = join(ctx.root, `grok-web-${value}-request.json`);
+      writeFileSync(instructions, 'Review and reference current upstream documentation.\n');
+      const proc = spawnSync(process.execPath, [
+        PREPARE, '--provider', 'grok', '--role', 'review', '--cwd', ctx.repo,
+        '--instructions', instructions, '--request', requestPath, '--web-search', value,
+      ], { encoding: 'utf8' });
+      assert.equal(proc.status, 0, proc.stderr);
+      assert.equal(JSON.parse(readFileSync(requestPath, 'utf8')).webSearch, value === 'true');
+    } finally { cleanup(ctx); }
+  }
+});
+
+test('prepare-request rejects unsupported or malformed web-search decisions', () => {
+  for (const [provider, value, message] of [
+    ['cursor', 'true', /supported only for grok/u],
+    ['grok', 'yes', /must be true\|false/u],
+  ]) {
+    const ctx = setup();
+    try {
+      const instructions = join(ctx.root, `${provider}-web-instructions.txt`);
+      const requestPath = join(ctx.root, `${provider}-web-request.json`);
+      writeFileSync(instructions, 'Review the bounded fake change.\n');
+      const proc = spawnSync(process.execPath, [
+        PREPARE, '--provider', provider, '--role', 'review', '--cwd', ctx.repo,
+        '--instructions', instructions, '--request', requestPath, '--web-search', value,
+      ], { encoding: 'utf8' });
+      assert.equal(proc.status, 5);
+      assert.match(proc.stderr, message);
+      assert.equal(existsSync(requestPath), false);
+    } finally { cleanup(ctx); }
+  }
+});
+
+test('prepare-request rejects unsupported and out-of-range turn budgets', () => {
+  for (const [provider, value, message] of [
+    ['cursor', '24', /supported only for grok\|claude/u],
+    ['grok', '101', /integer from 1 through 100/u],
+  ]) {
+    const ctx = setup();
+    try {
+      const instructions = join(ctx.root, `${provider}-turn-budget-instructions.txt`);
+      const requestPath = join(ctx.root, `${provider}-turn-budget-request.json`);
+      writeFileSync(instructions, 'Review the bounded fake change.\n');
+      const proc = spawnSync(process.execPath, [
+        PREPARE, '--provider', provider, '--role', 'review', '--cwd', ctx.repo,
+        '--instructions', instructions, '--request', requestPath, '--max-turns', value,
+      ], { encoding: 'utf8' });
+      assert.equal(proc.status, 5);
+      assert.match(proc.stderr, message);
+      assert.equal(existsSync(requestPath), false);
+    } finally { cleanup(ctx); }
+  }
 });
 
 test('untracked-only build changes are evidence and count as completion', () => {
@@ -735,6 +875,40 @@ test('Claude, OpenCode, and Cursor envelope normalization rejects noise and pros
   }
 });
 
+test('Grok 0.2.103 envelope normalization recovers strict text and preserves legacy direct output', () => {
+  let ctx = setup();
+  try {
+    const legacy = invoke(ctx, { provider: 'grok', role: 'review', mode: 'grok-legacy-direct' });
+    assert.equal(legacy.proc.status, 0, legacy.parsed.diagnostics.message);
+    assert.equal(legacy.parsed.status, 'succeeded');
+    assert.equal(legacy.parsed.usage.source, 'provider-output');
+  } finally { cleanup(ctx); }
+
+  for (const mode of ['grok-envelope-error', 'grok-envelope-missing', 'grok-envelope-metadata-drift']) {
+    ctx = setup();
+    try {
+      const run = invoke(ctx, { provider: 'grok', role: 'review', mode });
+      assert.equal(run.proc.status, 0, run.parsed.diagnostics.message);
+      assert.equal(run.parsed.status, 'succeeded');
+      assert.equal(run.parsed.usage.source, 'provider-envelope');
+    } finally { cleanup(ctx); }
+  }
+
+  for (const [mode, message] of [
+    ['grok-envelope-empty', /no candidate output/u],
+    ['prose', /exactly one JSON object/u],
+    ['noisy', /exactly one JSON object/u],
+  ]) {
+    ctx = setup();
+    try {
+      const run = invoke(ctx, { provider: 'grok', role: 'review', mode });
+      assert.equal(run.proc.status, 7, mode);
+      assert.equal(run.parsed.status, 'failed');
+      assert.match(run.parsed.diagnostics.message, message);
+    } finally { cleanup(ctx); }
+  }
+});
+
 test('timeout kills the subprocess and produces a normalized timed_out result', () => {
   const ctx = setup();
   try {
@@ -838,6 +1012,12 @@ test('malformed and unknown request fields fail before provider execution', () =
     { schemaVersion: 'handoff.request.v9', instructions: 'x' },
     { ...request(), unknown: true },
     { schemaVersion: 'handoff.request.v0.2', instructions: '' },
+    request({ maxTurns: 0 }),
+    request({ maxTurns: 101 }),
+    request({ maxTurns: 1.5 }),
+    request({ maxTurns: '12' }),
+    request({ webSearch: 'true' }),
+    request({ webSearch: 1 }),
   ]) {
     const ctx = setup();
     try {
@@ -846,6 +1026,40 @@ test('malformed and unknown request fields fail before provider execution', () =
       assert.equal(parsed.status, 'rejected');
     } finally { cleanup(ctx); }
   }
+});
+
+test('maxTurns is rejected for providers without a native turn control', () => {
+  const ctx = setup();
+  try {
+    const marker = join(ctx.root, 'unsupported-turn-budget-provider-invoked');
+    const { proc, parsed } = invoke(ctx, {
+      provider: 'cursor',
+      role: 'review',
+      requestValue: request({ maxTurns: 24 }),
+      extraEnv: { HANDOFF_FAKE_ANY_INVOKE_MARKER: marker },
+    });
+    assert.equal(proc.status, 5);
+    assert.equal(parsed.status, 'rejected');
+    assert.match(parsed.diagnostics.message, /maxTurns is supported only for grok\|claude/u);
+    assert.equal(existsSync(marker), false);
+  } finally { cleanup(ctx); }
+});
+
+test('webSearch is rejected for providers without a native web-search control', () => {
+  const ctx = setup();
+  try {
+    const marker = join(ctx.root, 'unsupported-web-search-provider-invoked');
+    const { proc, parsed } = invoke(ctx, {
+      provider: 'cursor',
+      role: 'review',
+      requestValue: request({ webSearch: true }),
+      extraEnv: { HANDOFF_FAKE_ANY_INVOKE_MARKER: marker },
+    });
+    assert.equal(proc.status, 5);
+    assert.equal(parsed.status, 'rejected');
+    assert.match(parsed.diagnostics.message, /webSearch is supported only for grok/u);
+    assert.equal(existsSync(marker), false);
+  } finally { cleanup(ctx); }
 });
 
 test('option-like or control-character model/effort values are rejected before any provider launch', () => {

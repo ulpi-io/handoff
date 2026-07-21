@@ -1,4 +1,4 @@
-# Provider adapter reference (handoff v0.3.0)
+# Provider adapter reference (handoff v0.3.1)
 
 Every provider below is reached only through `scripts/handoff.mjs run`. Capabilities advertise the
 roles implemented by the strict adapter; a run still requires the installed binary's preflight to
@@ -13,7 +13,7 @@ pass. There is no alternate invocation path.
 | Prompt transport | stdin | private temporary file | stdin | stdin | stdin | stdin |
 | Write role | `workspace-write` | `workspace` | write tools plus native Bash sandbox | permission-scoped Edit, no Bash | target passed with native `--allow-paths`, `--force` | rejected |
 | Read role | `read-only` | `read-only` | Read/Glob/Grep only | Read/Glob/Grep only | target passed with native `--readonly-paths`, no `--force` | `fs_read` only |
-| Provider result | native schema + last-message file | native JSON Schema | native schema in JSON envelope | normalized raw JSON events | strict object inside one JSON envelope | strict prompt object |
+| Provider result | native schema + last-message file | strict `structuredOutput` inside one JSON envelope | native schema in JSON envelope | normalized raw JSON events | strict object inside one JSON envelope | strict prompt object |
 | Cwd pin | CLI flag plus child cwd | CLI flag plus child cwd | child cwd | `--dir` plus child cwd | child cwd and outer sandbox workspace | child cwd |
 | Persistence | ephemeral | no memory flag; provider state writable | no session persistence | session/auth data retained | provider-native state may persist | provider-native state may persist |
 
@@ -50,8 +50,18 @@ approval/sandbox bypass.
 
 ### Grok
 
-Grok uses the built-in `workspace` and `read-only` profiles with cwd pinned, a 12-turn bound, native
-JSON Schema, and web search, subagents, and memory disabled. Per xAI's
+Grok uses the built-in `workspace` and `read-only` profiles with cwd pinned, an orchestrator-selected
+1–100 turn bound (default 12), native JSON Schema, and subagents and memory disabled. Web search is a
+hashed orchestrator decision that defaults off. When enabled, read roles add `WebSearch` and
+`WebFetch`; when disabled, the adapter passes `--disable-web-search` and denies web fetches. Read
+roles use headless `dontAsk`, always register `Read` and `Grep`, and explicitly deny Bash, edits, and
+MCP tools; the native `read-only` sandbox remains the filesystem boundary.
+All roles disable Grok's interactive plan mode so a machine run must execute to a terminal result.
+The adapter normalizes Grok's current one-object JSON envelope through `structuredOutput`, preserves
+valid token usage, and still accepts the older direct schema object. When Grok reports a native
+structured-output projection error, the adapter independently validates the envelope's exact `text`
+response against Handoff's strict schema. Non-ABI envelope metadata may vary; missing candidate
+output, prose, noise, and malformed inner objects still fail closed. Per xAI's
 [sandbox table](https://docs.x.ai/build/enterprise#sandbox), both profiles can read beyond cwd.
 `workspace` can write cwd, temporary directories, and Grok state; `read-only` retains only temporary
 and Grok-state writes. Child-network enforcement differs by platform and is reported narrowly.
@@ -59,8 +69,9 @@ and Grok-state writes. Child-network enforcement differs by platform and is repo
 ### Claude
 
 Claude uses bare and safe modes, strict empty MCP configuration, disabled skills/browser/session
-persistence, `dontAsk`, an explicit tool list, 12 turns, and native JSON Schema output. Write roles
-expose Bash/Edit/Write/Read/Glob/Grep. Read roles expose only Read/Glob/Grep.
+persistence, `dontAsk`, an explicit tool list, an orchestrator-selected 1–100 turn bound (default
+12), and native JSON Schema output. Write roles expose Bash/Edit/Write/Read/Glob/Grep. Read roles
+expose only Read/Glob/Grep.
 
 Claude's [native sandbox](https://code.claude.com/docs/en/sandboxing) applies to Bash and its children;
 the built-in file tools remain permission-controlled. The adapter enables the sandbox, requires

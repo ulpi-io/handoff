@@ -1,6 +1,6 @@
 {
   "schemaVersion": "handoff.bundle-digest.v0.2",
-  "bundleVersion": "0.3.0",
+  "bundleVersion": "0.3.1",
   "algorithm": "sha256",
   "files": [
     ".claude-plugin/plugin.json",
@@ -26,5 +26,5 @@
     "scripts/lib/providers/kiro.mjs",
     "scripts/lib/providers/opencode.mjs"
   ],
-  "digest": "sha256:416b776fcb1cd21fa3bc2fae78e62de15e3f1e36f0925844772ba6e0ae53bd2c"
+  "digest": "sha256:54f06bd140f2c11461969a072e4bca23d461282d40cede6ed02283fee25846a1"
 }

@@ -7,8 +7,8 @@
   "required": ["schemaVersion", "driverVersion", "bundleVersion", "bundleDigest", "provider", "role", "policy", "requestHash", "status", "exit", "output", "git", "timing", "usage", "diagnostics"],
   "properties": {
     "schemaVersion": { "const": "handoff.result.v0.2" },
-    "driverVersion": { "const": "0.3.0" },
-    "bundleVersion": { "const": "0.3.0" },
+    "driverVersion": { "const": "0.3.1" },
+    "bundleVersion": { "const": "0.3.1" },
     "bundleDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "provider": {
       "type": "object",
@@ -46,9 +46,13 @@
         "sandboxProfile": { "type": "string" },
         "permissionMode": { "type": "string" },
         "webSearch": { "type": "boolean" },
+        "webSearchConfigurable": { "const": true },
         "subagents": { "type": "boolean" },
         "memory": { "type": "boolean" },
-        "maxTurns": { "type": "integer", "minimum": 1 },
+        "maxTurns": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "maxTurnsConfigurable": { "const": true },
+        "maxTurnsMinimum": { "const": 1 },
+        "maxTurnsMaximum": { "const": 100 },
         "network": { "type": "string" },
         "readScope": { "type": "string" },
         "writableLocations": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
@@ -56,6 +60,7 @@
         "nativeBashSandbox": { "type": "boolean" },
         "fileToolConfinement": { "type": "string" },
         "toolAllowlist": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "toolDenylist": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "structuredResult": { "type": "string" },
         "providerState": { "type": "string" },
         "applyMode": { "type": "string" }

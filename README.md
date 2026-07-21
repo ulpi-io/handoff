@@ -1,12 +1,13 @@
-# handoff v0.3.0
+# handoff v0.3.1
 
-`handoff` exposes one execution path: the versioned, fail-closed machine ABI. Every slash command
+`handoff` exposes one execution path: the versioned, fail-closed machine ABI. Every frontend
 prepares a strict request and invokes that same driver. There is no direct provider helper and no
 weaker fallback.
 
 The wire schemas remain `handoff.*.v0.2`; the driver, bundle, and both plugin manifests are version
-`0.3.0` because this release removes the second execution surface and adds strict Claude, OpenCode,
-and Cursor adapters.
+`0.3.1`. This release lets the orchestrator select bounded native turn budgets for Grok and Claude,
+normalizes the current Grok JSON result envelope, makes Grok read roles safe for headless execution,
+and exposes web search as an explicit Grok request option without weakening output validation.
 
 ## Installation
 
@@ -31,7 +32,8 @@ marketplace repository.
 
 ## Slash commands
 
-Each command is on its own line for direct copy/paste:
+Claude Code exposes each thin command frontend separately. Each command is on its own line for direct
+copy/paste:
 
 ```text
 /handoff:codex-build <request>
@@ -47,6 +49,9 @@ Each command is on its own line for direct copy/paste:
 /handoff:kiro-review <request>
 ```
 
+Codex exposes the single parameterized `$handoff-run` skill instead of duplicating those frontends.
+Specify the provider, role, worktree, and bounded request; every combination reaches the same driver.
+
 Codex, Grok, Claude, OpenCode, and Cursor support `build`, `phase`, `review`, and `verify` through the
 machine ABI. Kiro supports only `review` and `verify`; there is deliberately no Kiro build command.
 An unsupported role is rejected before request parsing or provider launch.
@@ -60,10 +65,12 @@ First put the literal task in a new private instructions file, then create the r
 
 ```bash
 node /absolute/path/to/handoff/scripts/prepare-request.mjs \
-  --provider claude \
+  --provider grok \
   --role review \
   --cwd /absolute/path/to/git-worktree \
   --instructions /absolute/private/temp/instructions.txt \
+  --max-turns 32 \
+  --web-search true \
   --request /absolute/private/temp/request.json
 ```
 
@@ -71,7 +78,7 @@ Run the request and reserve a new result path:
 
 ```bash
 node /absolute/path/to/handoff/scripts/handoff.mjs run \
-  --provider claude \
+  --provider grok \
   --role review \
   --cwd /absolute/path/to/git-worktree \
   --request /absolute/private/temp/request.json \
@@ -103,8 +110,12 @@ Unknown fields are rejected. A minimal non-Codex request is:
 }
 ```
 
-`timeoutMs` is optional and must be between 100 and 3,600,000 milliseconds. `model` and `effort` are
-optional non-option strings. The result's request hash is SHA-256 over the exact request-file bytes.
+`timeoutMs` is optional and must be between 100 and 3,600,000 milliseconds. `maxTurns` is optional,
+must be an integer from 1 through 100, and is supported only by Grok and Claude; both default to 12
+when it is omitted. The preparer exposes it as `--max-turns`. `webSearch` is an optional Grok-only
+boolean, defaults to false, and is exposed as `--web-search true|false`; enable it when the delegated
+task needs current external references. `model` and `effort` are optional non-option strings. The
+result's request hash is SHA-256 over the exact request-file bytes.
 
 Codex additionally requires a `handoff.coordinator-approval.v0.2` object. The request preparer builds
 it automatically and binds the exact request, role, canonical cwd, and every applicable instruction
@@ -146,8 +157,8 @@ binary is enough: `pipeline.preflight.ok` is the runtime authority.
 | Provider | Roles | Write roles | Read roles | Strict defaults and boundary |
 |---|---|---|---|---|
 | Codex | all four | native `workspace-write` | native `read-only` | ephemeral execution; user config and exec-policy rules ignored; approvals and sandbox network disabled; exact coordinator-bound AGENTS rules injected; no Git-check skip or sandbox bypass |
-| Grok | all four | named `workspace` profile | named `read-only` profile | cwd pinned; 12 turns; native JSON Schema; web search, subagents, and memory disabled; both named profiles locally initialized during preflight |
-| Claude | all four | Bash, Edit, and Write exposed; Bash children use the native sandbox | only Read, Glob, and Grep exposed | `--bare`, `--safe-mode`, no persistence, no browser, strict empty MCP set, `dontAsk`, 12 turns, native JSON Schema; sandbox startup and unsandboxed Bash escape fail closed |
+| Grok | all four | named `workspace` profile | named `read-only` profile plus headless `dontAsk`; Read/Grep always, WebSearch/WebFetch only by request | cwd pinned; interactive plan mode disabled; Bash, edits, and MCP tools explicitly denied; orchestrator-selected 1–100 turns (default 12); web search is orchestrator-controlled and defaults off; current JSON envelope normalized before strict schema validation; subagents and memory disabled; both named profiles locally initialized during preflight |
+| Claude | all four | Bash, Edit, and Write exposed; Bash children use the native sandbox | only Read, Glob, and Grep exposed | `--bare`, `--safe-mode`, no persistence, no browser, strict empty MCP set, `dontAsk`, orchestrator-selected 1–100 turns (default 12), native JSON Schema; sandbox startup and unsandboxed Bash escape fail closed |
 | OpenCode | all four | Read, Glob, Grep, and Edit only | Read, Glob, and Grep only | temporary HOME/config/cache/state; project config, plugins, skills, MCP, Bash, web tools, subagents, LSP, questions, and external-directory access denied; exact resolved agent permissions preflighted; raw JSON events normalized |
 | Cursor | all four | target worktree passed through native `--allow-paths`; `--force` | target worktree passed through native `--readonly-paths`; no `--force` | isolated temporary sandbox workspace and HOME/XDG roots; preflight behavior-proves both target-path modes; one JSON result envelope; Git mutation blocking remains defense in depth |
 | Kiro | review, verify | unsupported | `fs_read` only | permission allowlist only; no `execute_bash`, no trust-all mode, and no native filesystem-isolation claim |
@@ -234,7 +245,8 @@ node --test scripts/test-pipeline-e2e.mjs
 The E2E suite creates temporary Git repositories and six fake provider executables. It crosses real
 subprocess/request/result boundaries and exercises all advertised roles, timeouts, cancellation,
 schema drift, untracked-only changes, reviewer mutation, symlink/path traversal, noisy/prose-only and
-oversized output, policy preflight failures, and exit mapping. It needs no network, live provider,
-authentication, or global provider configuration.
+oversized output, configurable turn budgets, current and legacy Grok output shapes, policy preflight
+failures, and exit mapping. It needs no network, live provider, authentication, or global provider
+configuration.
 
 MIT · ulpi.io

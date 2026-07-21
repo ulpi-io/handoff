@@ -15,6 +15,8 @@ import {
   ContractError,
   DEFAULT_TIMEOUT_MS,
   DRIVER_VERSION,
+  MAX_TURNS_PROVIDERS,
+  WEB_SEARCH_PROVIDERS,
   MAX_CAPTURE_BYTES,
   MAX_DIAGNOSTIC_BYTES,
   PIPELINE_PROVIDER_ROLES,
@@ -343,6 +345,12 @@ export async function executeMachineRun(options) {
     const requestBytes = readFileSync(requestPath);
     result.requestHash = sha256(requestBytes);
     const request = parseMachineRequest(requestBytes);
+    if (request.maxTurns !== undefined && !MAX_TURNS_PROVIDERS.includes(options.provider)) {
+      throw new ContractError(`request.maxTurns is supported only for ${MAX_TURNS_PROVIDERS.join('|')}`);
+    }
+    if (request.webSearch !== undefined && !WEB_SEARCH_PROVIDERS.includes(options.provider)) {
+      throw new ContractError(`request.webSearch is supported only for ${WEB_SEARCH_PROVIDERS.join('|')}`);
+    }
     if (options.provider !== 'codex' && request.coordinatorApproval) {
       throw new ContractError('request.coordinatorApproval is valid only for Codex pipeline runs');
     }
@@ -378,6 +386,8 @@ export async function executeMachineRun(options) {
       lastMsgFile,
       model: request.model,
       effort: request.effort,
+      maxTurns: request.maxTurns,
+      webSearch: request.webSearch,
       coordinatorApproval,
     });
     result.policy = {
