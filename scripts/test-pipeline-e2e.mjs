@@ -98,7 +98,12 @@ function invoke(ctx, {
   ];
   const proc = spawnSync(process.execPath, args, {
     encoding: 'utf8',
-    env: { ...process.env, PATH: `${ctx.bin}:${process.env.PATH || ''}`, HANDOFF_FAKE_MODE: mode, ...extraEnv },
+    env: {
+      ...process.env,
+      PATH: `${ctx.bin}:${process.env.PATH || ''}`,
+      HANDOFF_FAKE_MODE: mode,
+      ...extraEnv,
+    },
     timeout: 10_000,
   });
   assert.equal(proc.signal, null, proc.stderr);
@@ -155,7 +160,7 @@ test('capabilities --json preflights every advertised provider through one stric
   try {
     const proc = spawnSync(process.execPath, [DRIVER, 'capabilities', '--json'], {
       encoding: 'utf8',
-      env: { ...process.env, PATH: `${ctx.bin}:${process.env.PATH || ''}` },
+      env: { ...process.env, PATH: `${ctx.bin}:${process.env.PATH || ''}`, KIRO_API_KEY: '' },
     });
     assert.equal(proc.status, 0, proc.stderr);
     assert.equal(proc.stdout.trim().split('\n').length, 1);
@@ -182,9 +187,29 @@ test('capabilities --json preflights every advertised provider through one stric
     }
     assert.deepEqual(parsed.providers.find((entry) => entry.id === 'kiro').pipeline.roles, ['review', 'verify']);
     assert.deepEqual(Object.keys(parsed.providers.find((entry) => entry.id === 'kiro').pipeline.policies), ['review', 'verify']);
+    assert.equal(
+      parsed.providers.find((entry) => entry.id === 'kiro').pipeline.policies.review.headlessAuthentication,
+      'active Kiro session or KIRO_API_KEY, using native CLI precedence',
+    );
     for (const provider of ['claude', 'cursor', 'opencode']) {
       assert.deepEqual(parsed.providers.find((entry) => entry.id === provider).pipeline.roles, ['build', 'phase', 'review', 'verify']);
     }
+  } finally { cleanup(ctx); }
+});
+
+test('Kiro capability preflight permits native active-session authentication without an API key', () => {
+  const ctx = setup();
+  try {
+    const proc = spawnSync(process.execPath, [DRIVER, 'capabilities', '--json'], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${ctx.bin}:${process.env.PATH || ''}`, KIRO_API_KEY: '' },
+    });
+    assert.equal(proc.status, 0, proc.stderr);
+    const parsed = JSON.parse(proc.stdout);
+    const kiro = parsed.providers.find((entry) => entry.id === 'kiro');
+    assert.equal(kiro.pipeline.preflight.installed, true);
+    assert.equal(kiro.pipeline.preflight.ok, true);
+    assert.equal(kiro.pipeline.preflight.reason, null);
   } finally { cleanup(ctx); }
 });
 
@@ -223,7 +248,7 @@ for (const [provider, roles] of Object.entries(STRICT_ROLE_MATRIX)) {
           );
         }
         if (provider === 'kiro') {
-          assert.deepEqual(parsed.policy.toolAllowlist, ['fs_read']);
+          assert.deepEqual(parsed.policy.toolAllowlist, ['read', 'grep', 'glob']);
           assert.equal(parsed.policy.nativeFilesystemIsolation, false);
         }
         if (provider === 'opencode') {
@@ -304,9 +329,12 @@ test('strict adapters launch only their pinned control surfaces', () => {
         }
       }
       if (provider === 'kiro') {
-        assert.equal(args.includes('--trust-tools=fs_read'), true);
+        assert.equal(args.includes('--no-interactive'), true);
+        assert.equal(args.includes('--trust-tools=read,grep,glob'), true);
         assert.equal(args.some((arg) => arg.includes('trust-all')), false);
-        assert.equal(args.some((arg) => arg.includes('execute_bash')), false);
+        assert.equal(args.some((arg) => arg.includes('execute_bash') || arg.includes('shell')), false);
+        assert.equal(args.some((arg) => arg.includes('Handoff request supplied as piped context')), false);
+        assert.equal(args.some((arg) => arg.includes('Perform the bounded fake task.')), false);
       }
       if (provider === 'opencode') {
         assert.equal(args.includes('--pure'), true);
@@ -872,6 +900,25 @@ test('Claude, OpenCode, and Cursor envelope normalization rejects noise and pros
         assert.match(run.parsed.diagnostics.message, /JSON|missing structured_output|exactly one/u);
       } finally { cleanup(ctx); }
     }
+  }
+});
+
+test('Kiro extracts one terminal Handoff object after native tool progress and preamble', () => {
+  let ctx = setup();
+  try {
+    const run = invoke(ctx, { provider: 'kiro', role: 'review' });
+    assert.equal(run.proc.status, 0, run.parsed.diagnostics.message);
+    assert.equal(run.parsed.status, 'succeeded');
+  } finally { cleanup(ctx); }
+
+  for (const mode of ['prose', 'noisy']) {
+    ctx = setup();
+    try {
+      const run = invoke(ctx, { provider: 'kiro', role: 'review', mode });
+      assert.equal(run.proc.status, 7, mode);
+      assert.equal(run.parsed.status, 'failed');
+      assert.match(run.parsed.diagnostics.message, /exactly one JSON object/u);
+    } finally { cleanup(ctx); }
   }
 });
 

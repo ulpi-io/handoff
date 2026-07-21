@@ -33,10 +33,15 @@ Create a self-contained instruction document with a one-sentence goal, exact in-
 machine-checkable acceptance criteria, and guardrails. Reviews explicitly forbid changes and request
 concrete findings. Do not weaken or reinterpret the user's constraints.
 
+Select `build` or `phase` only when the delegated task must create a Git-observable change. Select
+`review` or `verify` when mutation is forbidden. Do not mislabel a Bash-only test or compilation as a
+write role merely to obtain tools; report an unsupported provider-role capability instead.
+
 For Grok and Claude, select `maxTurns` from 1 through 100 when the task needs a budget other than the
-12-turn default. An explicit user-provided budget wins. Use a larger value for scope that cannot
-realistically complete in 12 provider turns; do not shrink the task merely to preserve the default.
-Do not set `maxTurns` for providers without a native turn control.
+12-turn default. The hard maximum is exactly 100 turns; never request 101 or more. An explicit
+user-provided budget within that range wins. Use a larger value for scope that cannot realistically
+complete in 12 provider turns; do not shrink the task merely to preserve the default. Do not set
+`maxTurns` for providers without a native turn control.
 
 For Grok, set `webSearch` to true only when the task needs current external references or the user
 explicitly asks for web research. It defaults to false. Do not enable it speculatively, and do not
@@ -89,9 +94,12 @@ Delete only the exact temporary directory created for this run after the result 
 
 - Codex: ephemeral, user config and native rules disabled, coordinator-approved AGENTS.md injected,
   approval policy never, native `workspace-write` for build/phase and `read-only` for review/verify.
-- Grok: exact `workspace` or `read-only` named sandbox, cwd pinned, orchestrator-selected 1–100 turns
-  (default 12), current JSON-envelope normalization, orchestrator-controlled web search (default
-  off), and subagents and memory disabled.
+- Grok: exact named sandbox, cwd pinned, orchestrator-selected 1–100 turns (default 12, hard maximum
+  100), current JSON-envelope normalization, orchestrator-controlled web search (default off), and
+  subagents and memory disabled. Build/phase use `workspace` plus `auto` and retain Grok's native
+  default tools, including Bash and editing; Handoff does not select their configured MCPs.
+  Review/verify use `read-only` plus `dontAsk`, expose Read/Grep (and explicitly requested web tools),
+  and deny Bash, Edit, and MCP tools.
 - Claude: bare and safe modes, no persistence, strict empty MCP config, orchestrator-selected 1–100
   turns (default 12), JSON Schema output, explicit tools, and fail-closed native Bash sandboxing for
   write roles.
@@ -102,7 +110,13 @@ Delete only the exact temporary directory created for this run after the result 
   isolated temporary workspace. Build/phase receive the target as `--allow-paths` and use `--force`;
   review/verify receive it as `--readonly-paths` and omit `--force`. Git mutation blocking remains
   defense in depth.
-- Kiro: review/verify only, with `fs_read` and never `execute_bash`. This is a tool allowlist, not native
+- Kiro: review/verify only, with canonical `read`, `grep`, and `glob`, never write or shell. Do not
+  demand an API key merely because the run is non-interactive: Kiro's native credential precedence
+  uses an active browser session first and `KIRO_API_KEY` second. API-key usage consumes the same Kiro
+  subscription credits; do not describe it as separate per-call API billing. Use the installed CLI's
+  stdin-only one-shot path: the complete request is piped on stdin and no prompt bytes go on argv.
+  Kiro's tool-progress output, final ANSI plus `> ` response frame, and single terminal Handoff
+  object are normalized before strict JSON validation. This is a tool allowlist, not native
   filesystem isolation.
 
 All policies retain the same-UID limitation: the provider sandbox is not a boundary against the

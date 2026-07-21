@@ -1,13 +1,13 @@
-# handoff v0.3.1
+# handoff v0.3.2
 
 `handoff` exposes one execution path: the versioned, fail-closed machine ABI. Every frontend
 prepares a strict request and invokes that same driver. There is no direct provider helper and no
 weaker fallback.
 
 The wire schemas remain `handoff.*.v0.2`; the driver, bundle, and both plugin manifests are version
-`0.3.1`. This release lets the orchestrator select bounded native turn budgets for Grok and Claude,
-normalizes the current Grok JSON result envelope, makes Grok read roles safe for headless execution,
-and exposes web search as an explicit Grok request option without weakening output validation.
+`0.3.2`. This release fixes Kiro 2.13 native stdout-frame normalization while retaining stdin-only
+request privacy, and makes Grok's write/read tool split and 100-turn hard maximum explicit to
+orchestrators.
 
 ## Installation
 
@@ -112,7 +112,8 @@ Unknown fields are rejected. A minimal non-Codex request is:
 
 `timeoutMs` is optional and must be between 100 and 3,600,000 milliseconds. `maxTurns` is optional,
 must be an integer from 1 through 100, and is supported only by Grok and Claude; both default to 12
-when it is omitted. The preparer exposes it as `--max-turns`. `webSearch` is an optional Grok-only
+when it is omitted and reject anything above the hard maximum of 100. The preparer exposes it as
+`--max-turns`. `webSearch` is an optional Grok-only
 boolean, defaults to false, and is exposed as `--web-search true|false`; enable it when the delegated
 task needs current external references. `model` and `effort` are optional non-option strings. The
 result's request hash is SHA-256 over the exact request-file bytes.
@@ -157,11 +158,11 @@ binary is enough: `pipeline.preflight.ok` is the runtime authority.
 | Provider | Roles | Write roles | Read roles | Strict defaults and boundary |
 |---|---|---|---|---|
 | Codex | all four | native `workspace-write` | native `read-only` | ephemeral execution; user config and exec-policy rules ignored; approvals and sandbox network disabled; exact coordinator-bound AGENTS rules injected; no Git-check skip or sandbox bypass |
-| Grok | all four | named `workspace` profile | named `read-only` profile plus headless `dontAsk`; Read/Grep always, WebSearch/WebFetch only by request | cwd pinned; interactive plan mode disabled; Bash, edits, and MCP tools explicitly denied; orchestrator-selected 1–100 turns (default 12); web search is orchestrator-controlled and defaults off; current JSON envelope normalized before strict schema validation; subagents and memory disabled; both named profiles locally initialized during preflight |
+| Grok | all four | named `workspace` plus `auto`; native default tools include Bash and editing, while configured MCP exposure is not Handoff-selected | named `read-only` plus headless `dontAsk`; Read/Grep always, WebSearch/WebFetch only by request; Bash, Edit, and MCP denied | cwd pinned; interactive plan mode disabled; orchestrator-selected 1–100 turns (default 12, hard maximum 100); web search is orchestrator-controlled and defaults off; current JSON envelope normalized before strict schema validation; subagents and memory disabled; both named profiles locally initialized during preflight |
 | Claude | all four | Bash, Edit, and Write exposed; Bash children use the native sandbox | only Read, Glob, and Grep exposed | `--bare`, `--safe-mode`, no persistence, no browser, strict empty MCP set, `dontAsk`, orchestrator-selected 1–100 turns (default 12), native JSON Schema; sandbox startup and unsandboxed Bash escape fail closed |
 | OpenCode | all four | Read, Glob, Grep, and Edit only | Read, Glob, and Grep only | temporary HOME/config/cache/state; project config, plugins, skills, MCP, Bash, web tools, subagents, LSP, questions, and external-directory access denied; exact resolved agent permissions preflighted; raw JSON events normalized |
 | Cursor | all four | target worktree passed through native `--allow-paths`; `--force` | target worktree passed through native `--readonly-paths`; no `--force` | isolated temporary sandbox workspace and HOME/XDG roots; preflight behavior-proves both target-path modes; one JSON result envelope; Git mutation blocking remains defense in depth |
-| Kiro | review, verify | unsupported | `fs_read` only | permission allowlist only; no `execute_bash`, no trust-all mode, and no native filesystem-isolation claim |
+| Kiro | review, verify | unsupported | canonical `read`, `grep`, and `glob` only | uses the CLI's native credential precedence (active login, then `KIRO_API_KEY`); permission allowlist only; no write/shell tools, no trust-all mode, and no native filesystem-isolation claim |
 
 ### What those guarantees mean
 
@@ -208,10 +209,18 @@ host-wide immutability or cwd-only reads. xAI documents Landlock on Linux and Se
 child-network blocking for `read-only` is platform-dependent, so Handoff reports the narrower
 guarantee instead of universal network isolation.
 
-Kiro's [custom-agent tool configuration](https://kiro.dev/docs/cli/custom-agents/configuration-reference/)
-controls permission, not a kernel filesystem boundary. Kiro is therefore limited
-to review/verify with `fs_read`. An external receipt is not accepted as a role upgrade, and the driver
-never falls back to trust-all tools.
+Kiro's [headless mode](https://kiro.dev/docs/cli/headless/) documents `KIRO_API_KEY` for portable
+automation, while its [authentication reference](https://kiro.dev/docs/cli/authentication/) gives an
+active browser session precedence over that variable. Handoff therefore lets the native CLI select
+either authenticated path instead of requiring an API key locally. The installed Kiro 2.13 CLI also
+retains its stdin-only one-shot behavior: Handoff streams the complete request through stdin and puts
+none of its bytes on argv. Kiro writes tool progress before an ANSI-decorated final `> ` response
+frame, so the adapter extracts that last native frame and exactly one terminal Handoff object before
+applying the unchanged strict JSON validator. Its
+[custom-agent tool configuration](https://kiro.dev/docs/cli/custom-agents/configuration-reference/)
+controls permission, not a kernel filesystem boundary. Kiro is therefore limited to review/verify
+with canonical `read`, `grep`, and `glob`. An external receipt is not accepted as a role upgrade, and the driver never falls
+back to trust-all tools.
 
 ### Same-UID threat model
 

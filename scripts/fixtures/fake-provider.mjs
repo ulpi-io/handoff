@@ -224,6 +224,10 @@ function providerStdout() {
     const stream = events.map((event) => JSON.stringify(event)).join('\n') + '\n';
     return mode === 'noisy' ? `provider noise\n${stream}` : stream;
   }
+  if (executable === 'kiro-cli') {
+    const decorated = `Reading files with trusted tools\n\n\x1b[m> \x1b[0mReview complete; here is the machine result.\n\n${serialized}`;
+    return mode === 'noisy' ? `${decorated}\nprovider noise` : decorated;
+  }
   return mode === 'noisy' ? `provider noise\n${serialized}` : serialized;
 }
 

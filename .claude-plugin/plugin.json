@@ -1,6 +1,6 @@
 {
   "name": "handoff",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Strict machine-only handoff to Codex, Grok, Claude, OpenCode, Cursor, and review-only Kiro. Every frontend uses the same fail-closed ABI with explicit policy preflight, structured results, and Git evidence.",
   "author": {
     "name": "ulpi.io",

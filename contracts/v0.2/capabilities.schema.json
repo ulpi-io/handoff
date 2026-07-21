@@ -7,8 +7,8 @@
   "required": ["schemaVersion", "driverVersion", "bundleVersion", "bundleDigest", "roles", "providers"],
   "properties": {
     "schemaVersion": { "const": "handoff.capabilities.v0.2" },
-    "driverVersion": { "const": "0.3.1" },
-    "bundleVersion": { "const": "0.3.1" },
+    "driverVersion": { "const": "0.3.2" },
+    "bundleVersion": { "const": "0.3.2" },
     "bundleDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "roles": { "const": ["build", "phase", "review", "verify"] },
     "providers": {
@@ -83,6 +83,7 @@
         "coordinatorApprovalRequired": { "type": "boolean" },
         "sandboxProfile": { "type": "string" },
         "permissionMode": { "type": "string" },
+        "headlessAuthentication": { "type": "string" },
         "webSearch": { "type": "boolean" },
         "webSearchConfigurable": { "const": true },
         "subagents": { "type": "boolean" },

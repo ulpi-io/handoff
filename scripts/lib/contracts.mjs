@@ -4,8 +4,8 @@ import { dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TextDecoder } from 'node:util';
 
-export const DRIVER_VERSION = '0.3.1';
-export const BUNDLE_VERSION = '0.3.1';
+export const DRIVER_VERSION = '0.3.2';
+export const BUNDLE_VERSION = '0.3.2';
 export const CAPABILITIES_SCHEMA_VERSION = 'handoff.capabilities.v0.2';
 export const REQUEST_SCHEMA_VERSION = 'handoff.request.v0.2';
 export const PROVIDER_OUTPUT_SCHEMA_VERSION = 'handoff.provider-output.v0.2';

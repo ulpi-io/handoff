@@ -1,4 +1,4 @@
-# Provider adapter reference (handoff v0.3.1)
+# Provider adapter reference (handoff v0.3.2)
 
 Every provider below is reached only through `scripts/handoff.mjs run`. Capabilities advertise the
 roles implemented by the strict adapter; a run still requires the installed binary's preflight to
@@ -10,9 +10,9 @@ pass. There is no alternate invocation path.
 |---|---|---|---|---|---|---|
 | Binary | `codex` | `grok` | `claude` | `opencode` | `cursor-agent` | `kiro-cli` |
 | Roles | all four | all four | all four | all four | all four | review, verify |
-| Prompt transport | stdin | private temporary file | stdin | stdin | stdin | stdin |
+| Prompt transport | stdin | private temporary file | stdin | stdin | stdin | stdin only; no prompt bytes on argv |
 | Write role | `workspace-write` | `workspace` | write tools plus native Bash sandbox | permission-scoped Edit, no Bash | target passed with native `--allow-paths`, `--force` | rejected |
-| Read role | `read-only` | `read-only` | Read/Glob/Grep only | Read/Glob/Grep only | target passed with native `--readonly-paths`, no `--force` | `fs_read` only |
+| Read role | `read-only` | `read-only` | Read/Glob/Grep only | Read/Glob/Grep only | target passed with native `--readonly-paths`, no `--force` | canonical `read`, `grep`, and `glob` only |
 | Provider result | native schema + last-message file | strict `structuredOutput` inside one JSON envelope | native schema in JSON envelope | normalized raw JSON events | strict object inside one JSON envelope | strict prompt object |
 | Cwd pin | CLI flag plus child cwd | CLI flag plus child cwd | child cwd | `--dir` plus child cwd | child cwd and outer sandbox workspace | child cwd |
 | Persistence | ephemeral | no memory flag; provider state writable | no session persistence | session/auth data retained | provider-native state may persist | provider-native state may persist |
@@ -29,7 +29,8 @@ pass. There is no alternate invocation path.
 - OpenCode: global/run flags plus byte-equivalent resolved permissions for the selected named agent.
 - Cursor: main and sandbox flags plus behavior probes proving the target repository is readable but
   not writable through `--readonly-paths`, and writable through `--allow-paths`.
-- Kiro: non-interactive chat and exact tool-trust flag support.
+- Kiro: non-interactive chat and exact tool-trust flag support. Authentication remains native to the
+  CLI: an active browser session takes precedence, followed by `KIRO_API_KEY`.
 
 Missing binaries, flag drift, failed probes, and unsupported roles are `not_run`; no provider process
 is launched for the task.
@@ -51,7 +52,10 @@ approval/sandbox bypass.
 ### Grok
 
 Grok uses the built-in `workspace` and `read-only` profiles with cwd pinned, an orchestrator-selected
-1–100 turn bound (default 12), native JSON Schema, and subagents and memory disabled. Web search is a
+1–100 turn bound (default 12, hard maximum 100), native JSON Schema, and subagents and memory
+disabled. Build/phase use `workspace` plus `auto` and do not receive the read-role tool denylist, so
+Bash and editing remain available through Grok's native defaults; configured MCP exposure is not
+selected by Handoff. Web search is a
 hashed orchestrator decision that defaults off. When enabled, read roles add `WebSearch` and
 `WebFetch`; when disabled, the adapter passes `--disable-web-search` and denies web fetches. Read
 roles use headless `dontAsk`, always register `Read` and `Grep`, and explicitly deny Bash, edits, and
@@ -104,10 +108,18 @@ against the provider schema. Network is enabled for the nested agent so it can r
 
 ### Kiro
 
-Kiro is review/verify-only. Its invocation trusts exactly `fs_read`; `execute_bash` is absent. Per
-Kiro's [tool configuration reference](https://kiro.dev/docs/cli/custom-agents/configuration-reference/), this is
-a tool-permission allowlist, not native filesystem isolation. Build/phase are rejected and no receipt
-or fallback can upgrade them.
+Kiro is review/verify-only. Kiro documents `KIRO_API_KEY` for portable automation, but its native
+authentication precedence uses an active browser session first and then the environment key. Handoff
+accepts either native path. Installed Kiro 2.13 retains the stdin-only invocation used by the proven
+Ulpi helper, so the complete request is piped with no positional prompt bytes. Kiro writes tool
+progress before an ANSI-decorated final `> ` response frame even under `--no-interactive`; the adapter
+extracts that last native frame and exactly one terminal Handoff object before strict JSON validation.
+Missing objects, multiple objects, Markdown fences, and noise after the terminal object fail closed.
+Its invocation trusts exactly canonical `read`, `grep`, and `glob`; write and shell are absent. Per Kiro's
+[headless documentation](https://kiro.dev/docs/cli/headless/) and
+[tool configuration reference](https://kiro.dev/docs/cli/custom-agents/configuration-reference/),
+this is a tool-permission allowlist, not native filesystem isolation. Build/phase are rejected and no
+receipt or fallback can upgrade them.
 
 ## Shared enforcement
 
