@@ -8,6 +8,27 @@ The wire schemas remain `handoff.*.v0.2`; the driver, bundle, and both plugin ma
 `0.3.0` because this release removes the second execution surface and adds strict Claude, OpenCode,
 and Cursor adapters.
 
+## Installation
+
+Handoff is available from the [Ulpi plugin marketplace](https://github.com/ulpi-io/marketplace).
+
+### Claude Code
+
+```text
+/plugin marketplace add ulpi-io/marketplace
+/plugin install handoff@ulpi
+```
+
+### Codex
+
+```bash
+codex plugin marketplace add ulpi-io/marketplace
+codex plugin add handoff@ulpi
+```
+
+Handoff resolves directly from this repository. To update it, push the change here, not to the
+marketplace repository.
+
 ## Slash commands
 
 Each command is on its own line for direct copy/paste:
