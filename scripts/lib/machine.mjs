@@ -199,7 +199,7 @@ function setDiagnostics(result, { message = null, stderr = '', stdout = '', forc
   };
 }
 
-function providerPromptV03(request, coordinatorApproval = null) {
+function providerPromptV03(request, coordinatorApproval = null, outputSchema = PROVIDER_OUTPUT_SCHEMA_V03) {
   const semantic = request.operation === 'advice'
     ? 'Give a direct, self-contained expert answer in response. This operation is read-only: do not modify files.'
     : `Execute the '${request.mode}' handoff. Put the concise completion summary in response.`;
@@ -209,7 +209,7 @@ function providerPromptV03(request, coordinatorApproval = null) {
     'Return exactly one JSON object matching the supplied provider-output schema. Do not wrap it in Markdown or add prose.',
     'The complete required provider-output JSON Schema is:',
     '<handoff-provider-output-json-schema>',
-    JSON.stringify(PROVIDER_OUTPUT_SCHEMA_V03),
+    JSON.stringify(outputSchema),
     '</handoff-provider-output-json-schema>',
   ];
   if (request.delegation.mode === 'advice-only') {
@@ -407,9 +407,11 @@ export async function executeMachineRun(options) {
     const schemaFile = join(temp, 'provider-output.schema.json');
     const promptFile = join(temp, 'request.txt');
     const lastMsgFile = join(temp, 'provider-result.json');
-    const outputSchema = PROVIDER_OUTPUT_SCHEMA_V03;
+    const outputSchema = typeof adapter.pipelineOutputSchema === 'function'
+      ? adapter.pipelineOutputSchema(PROVIDER_OUTPUT_SCHEMA_V03)
+      : PROVIDER_OUTPUT_SCHEMA_V03;
     const schemaJson = JSON.stringify(outputSchema);
-    const prompt = providerPromptV03(request, coordinatorApproval);
+    const prompt = providerPromptV03(request, coordinatorApproval, outputSchema);
     writeFileSync(schemaFile, `${JSON.stringify(outputSchema, null, 2)}\n`, { mode: 0o600 });
     writeFileSync(promptFile, prompt, { mode: 0o600 });
 

@@ -5,7 +5,7 @@ import { ContractError } from './contracts.mjs';
 import { acquireRootInvocationAuthority, assertFrontendInvocationAuthority } from './invocation-authority.mjs';
 import { executeMachineRun, machineCapabilitiesV03 } from './machine.mjs';
 import { executeNestedRequest, hasSupervisorContext } from './nested-client.mjs';
-import { createSupervisorRuntimeDirectory } from './paths.mjs';
+import { atomicWritePrivateFile, createSupervisorRuntimeDirectory } from './paths.mjs';
 import { prepareV03Request } from './request-preparer.mjs';
 import { HandoffSupervisor } from './supervisor.mjs';
 import { HARNESSES, MODES } from './selection.mjs';
@@ -155,18 +155,24 @@ export async function executeFrontend(argv, dependencies = {}) {
       },
     });
     const serialized = Buffer.from(`${JSON.stringify(machine.result)}\n`);
-    let bytes = serialized;
+    let ownsResult = false;
     if (existsSync(parsed.options.result)) {
       const observed = readFileSync(parsed.options.result);
       // The machine result in memory is authoritative. A pre-existing, replaced, or externally
       // modified --result path must never become the frontend's stdout machine object.
-      if (observed.equals(serialized)) bytes = observed;
+      ownsResult = observed.equals(serialized);
     }
     if (supervisor.runtime.store.nodes.get(prepared.request.lineage.runId)?.state === 'running') {
-      supervisor.runtime.store.terminalize(prepared.request.lineage.runId, { state: machine.result.status, resultBytes: bytes });
+      // The root result contains the final DAG, so hashing those same bytes inside that DAG would be
+      // circular. Root resultHash remains null; nested result files retain independently verifiable
+      // hashes in the final root snapshot.
+      supervisor.runtime.store.terminalize(prepared.request.lineage.runId, { state: machine.result.status });
     }
-    await supervisor.close(closureStatus(machine.result.status));
+    const finalDag = await supervisor.close(closureStatus(machine.result.status));
     supervisor = null;
+    if (finalDag) machine.result.dag = finalDag;
+    const bytes = Buffer.from(`${JSON.stringify(machine.result)}\n`);
+    if (ownsResult) atomicWritePrivateFile(parsed.options.result, bytes);
     return { bytes, result: machine.result, exitCode: machine.exitCode };
   } finally {
     if (supervisor) { try { await supervisor.close('cancelled'); } catch { /* retain primary failure */ } }

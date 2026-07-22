@@ -117,6 +117,73 @@ export function pipelinePolicy(role, coordinatorApproval = null) {
   return policy;
 }
 
+function nullable(schema) {
+  if (typeof schema.type === 'string') return { ...schema, type: [schema.type, 'null'] };
+  if (Array.isArray(schema.type)) return { ...schema, type: [...new Set([...schema.type, 'null'])] };
+  return { anyOf: [schema, { type: 'null' }] };
+}
+
+function jsonType(value) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  if (Number.isInteger(value)) return 'integer';
+  if (typeof value === 'number') return 'number';
+  return typeof value;
+}
+
+function strictifyObjectProperties(schema) {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return schema;
+  const result = { ...schema };
+  if (result.type === undefined && Object.hasOwn(result, 'const')) result.type = jsonType(result.const);
+  if (result.type === undefined && Array.isArray(result.enum) && result.enum.length) {
+    const types = [...new Set(result.enum.map(jsonType))];
+    result.type = types.length === 1 ? types[0] : types;
+  }
+  if (result.$defs) {
+    result.$defs = Object.fromEntries(Object.entries(result.$defs).map(([key, value]) => [key, strictifyObjectProperties(value)]));
+  }
+  if (result.items) result.items = strictifyObjectProperties(result.items);
+  for (const keyword of ['anyOf', 'oneOf', 'allOf']) {
+    if (Array.isArray(result[keyword])) result[keyword] = result[keyword].map(strictifyObjectProperties);
+  }
+  if (result.properties && typeof result.properties === 'object' && !Array.isArray(result.properties)) {
+    const originallyRequired = new Set(Array.isArray(result.required) ? result.required : []);
+    result.properties = Object.fromEntries(Object.entries(result.properties).map(([key, value]) => {
+      const child = strictifyObjectProperties(value);
+      return [key, originallyRequired.has(key) ? child : nullable(child)];
+    }));
+    result.required = Object.keys(result.properties);
+  }
+  return result;
+}
+
+export function pipelineOutputSchema(schema) {
+  // OpenAI strict structured outputs require every object property to be listed in `required`.
+  // Canonically optional Handoff fields become required-but-nullable only at this adapter edge.
+  return strictifyObjectProperties(JSON.parse(JSON.stringify(schema)));
+}
+
+export function pipelineExtractResult(raw) {
+  const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
+  let value;
+  try { value = JSON.parse(bytes.toString('utf8')); }
+  catch { return { bytes }; }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { bytes };
+  for (const item of Array.isArray(value.evidence) ? value.evidence : []) {
+    if (item && typeof item === 'object' && item.path === null) delete item.path;
+  }
+  for (const item of Array.isArray(value.findings) ? value.findings : []) {
+    if (item && typeof item === 'object') {
+      if (item.file === null) delete item.file;
+      if (item.line === null) delete item.line;
+    }
+  }
+  if (value.usage && typeof value.usage === 'object' && !Array.isArray(value.usage)) {
+    for (const key of ['inputTokens', 'outputTokens', 'totalTokens']) if (value.usage[key] === null) delete value.usage[key];
+  }
+  return { bytes: Buffer.from(JSON.stringify(value)) };
+}
+
 export function pipelineInvocation({ bin, role, cwd, model, effort, schemaFile, lastMsgFile, coordinatorApproval, mcpDescriptor, bash = true }) {
   if (!coordinatorApproval) throw new Error('Codex pipeline invocation requires coordinator approval binding');
   const policy = pipelinePolicy(role, coordinatorApproval);

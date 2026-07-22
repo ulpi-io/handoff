@@ -42,8 +42,8 @@ invocation-isolated MCP configuration has not been proved, so MCP rejects.
 
 ### Claude
 
-Claude uses bare/safe modes, no session persistence or browser, native JSON Schema, explicit tools,
-and strict private MCP configuration. Read-only roles can receive Bash, but Bash runs with
+Claude uses safe mode (which retains native OAuth/keychain login), no session persistence or browser,
+native JSON Schema, explicit tools, and strict private MCP configuration. Read-only roles can receive Bash, but Bash runs with
 fail-if-unavailable sandbox settings and cwd writes denied. Built-in file tools remain governed by
 Claude permissions, so Handoff does not claim whole-agent native filesystem isolation. WebSearch and
 WebFetch are included only when requested.

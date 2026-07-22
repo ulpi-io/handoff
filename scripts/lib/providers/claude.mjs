@@ -55,7 +55,7 @@ export function pipelinePreflight(bin) {
   const flags = flagPreflight(bin, {
     helpArgs: ['--help'],
     requiredFlags: [
-      '--allowedTools', '--bare', '--disable-slash-commands', '--json-schema',
+      '--allowedTools', '--disable-slash-commands', '--json-schema',
       '--mcp-config', '--no-chrome', '--no-session-persistence', '--output-format', '--permission-mode',
       '--safe-mode', '--settings', '--strict-mcp-config', '--tools',
     ],
@@ -63,11 +63,11 @@ export function pipelinePreflight(bin) {
   if (!flags.ok) return flags;
 
   // Claude's official reference says --help is intentionally incomplete, so --max-turns is proved
-  // here rather than by help text. Invalid schema parsing is a local, authentication-free proof that
-  // this release accepted the complete strict invocation surface. Sandbox availability is then
-  // fail-closed at run startup.
+  // here rather than by help text. Safe mode disables customizations while retaining the user's
+  // native OAuth/keychain login; bare mode cannot be used because it intentionally disables that
+  // authentication path. Invalid schema parsing remains a local, authentication-free proof.
   const probe = spawnSync(bin, [
-    '--bare', '--safe-mode', '--settings', settingsJson(), '--strict-mcp-config', '--mcp-config', EMPTY_MCP,
+    '--safe-mode', '--settings', settingsJson(), '--strict-mcp-config', '--mcp-config', EMPTY_MCP,
     '--disable-slash-commands', '--no-session-persistence', '--permission-mode', 'dontAsk',
     '--tools', 'Read', '--allowedTools', 'Read', '--max-turns', '1', '-p', '--output-format', 'json',
     '--json-schema', 'handoff-invalid-json',
@@ -96,9 +96,9 @@ export function pipelinePolicy(role, maxTurns = DEFAULT_MAX_TURNS, { bash = writ
     filesystem: canWrite ? 'project-write-by-default; managed policy remains authoritative' : 'read-only-tool-surface',
     approvals: 'never (dontAsk)',
     ephemeral: true,
-    userConfiguration: 'disabled by bare and safe modes',
+    userConfiguration: 'disabled by safe mode; native OAuth/keychain authentication retained',
     managedConfiguration: 'honored by Claude Code',
-    projectRules: 'disabled by bare mode',
+    projectRules: 'disabled by safe mode',
     // Claude documents the native sandbox as a Bash/child-process boundary. Built-in file tools
     // remain permission-controlled, so the provider run as a whole is not labeled OS-isolated.
     nativeFilesystemIsolation: false,
@@ -115,6 +115,15 @@ export function pipelinePolicy(role, maxTurns = DEFAULT_MAX_TURNS, { bash = writ
     network: webSearch ? 'Claude WebSearch/WebFetch enabled; Bash child network remains sandbox-denied' : (bash ? 'Bash child network denied; provider API remains reachable' : 'no network-capable tool exposed'),
     structuredResult: 'native JSON Schema in Claude JSON envelope',
   };
+}
+
+export function pipelineOutputSchema(schema) {
+  const compatible = JSON.parse(JSON.stringify(schema));
+  // Claude Code validates with its bundled dialect registry. A draft URI it has not registered
+  // rejects before the model runs even though the schema keywords themselves are supported.
+  delete compatible.$schema;
+  delete compatible.$id;
+  return compatible;
 }
 
 function materializeMcp(descriptor, tempRoot) {
@@ -147,7 +156,7 @@ export function pipelineInvocation({ bin, role, cwd, tempRoot, model, effort, sc
   const tools = policy.toolAllowlist.join(',');
   const mcpConfig = materializeMcp(mcpDescriptor, tempRoot);
   const args = [
-    '--bare', '--safe-mode', '--settings', settingsJson({ cwd, canWrite: writable(role) }),
+    '--safe-mode', '--settings', settingsJson({ cwd, canWrite: writable(role) }),
     '--strict-mcp-config', '--mcp-config', mcpConfig,
     '--disable-slash-commands', '--no-session-persistence', '--no-chrome',
     '--permission-mode', 'dontAsk', '--tools', tools, '--allowedTools', tools,
@@ -172,8 +181,13 @@ export function pipelineExtractResult(raw) {
   const text = decodeUtf8(raw, 'Claude output', 'invalid_provider_output');
   try { envelope = JSON.parse(text); }
   catch { throw new ContractError('Claude output must be exactly one JSON envelope', 'invalid_provider_output'); }
-  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope) || envelope.is_error === true) {
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {
     throw new ContractError('Claude returned a malformed or error result envelope', 'invalid_provider_output');
+  }
+  if (envelope.is_error === true) {
+    const detail = [envelope.error, envelope.result, envelope.message].find((value) => typeof value === 'string' && value.trim());
+    const suffix = detail ? `: ${detail.trim().slice(0, 1024)}` : '';
+    throw new ContractError(`Claude returned an error result envelope${suffix}`, 'invalid_provider_output');
   }
   if (!envelope.structured_output || typeof envelope.structured_output !== 'object' || Array.isArray(envelope.structured_output)) {
     throw new ContractError('Claude result envelope is missing structured_output', 'invalid_provider_output');

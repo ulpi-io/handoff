@@ -38,6 +38,10 @@ test('sealed root handoff carries exact routing, selection, grants, budgets, and
     assert.equal(parsed.output.response, 'fake build completed');
     assert.equal(parsed.git.changed, true);
     assert.equal(parsed.dag.limits.maxNodes, 4);
+    assert.equal(parsed.dag.status, 'succeeded');
+    assert.equal(parsed.dag.activeCount, 0);
+    assert.equal(parsed.dag.nodes[0].state, 'succeeded');
+    assert.equal(parsed.dag.nodes[0].resultHash, null);
     assert.equal(Object.hasOwn(JSON.parse(readFileSync(invocationCapture, 'utf8')).env, 'HANDOFF_SUPERVISOR_CONTEXT'), false);
     assert.match(readFileSync(promptCapture, 'utf8'), /No nested supervisor capability is available/u);
   } finally { cleanupV03(context); }
