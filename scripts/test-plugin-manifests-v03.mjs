@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 const targets = ['claude', 'codex', 'cursor', 'grok', 'kiro', 'opencode'];
 const skills = ['get-advice', 'handoff-run', 'handoff-run-with-advice', ...targets.flatMap((target) => [`handoff-${target}`, `handoff-${target}-with-advice`])];
-const commandModes = { claude: ['build', 'review'], codex: ['build', 'review'], cursor: ['build', 'review'], grok: ['build', 'review'], kiro: ['review'], opencode: ['build', 'review'] };
+const commandModes = { claude: ['build', 'review'], codex: ['build', 'review'], cursor: ['build', 'review'], grok: ['build', 'review'], kiro: ['build', 'review'], opencode: ['build', 'review'] };
 
 test('Claude and Codex manifests expose the same shared skill root and no executable registration', () => {
   const claude = JSON.parse(readFileSync('.claude-plugin/plugin.json', 'utf8'));
@@ -22,7 +22,7 @@ test('Claude and Codex manifests expose the same shared skill root and no execut
   for (const skill of skills) assert.equal(existsSync(join('skills', skill, 'SKILL.md')), true, skill);
 });
 
-test('Claude manifest command root reaches all eleven plain and eleven with-advice commands', () => {
+test('Claude manifest command root reaches all twelve plain and twelve with-advice commands', () => {
   for (const [target, modes] of Object.entries(commandModes)) {
     for (const mode of modes) {
       assert.equal(existsSync(join('commands', `${target}-${mode}.md`)), true);

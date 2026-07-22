@@ -8,6 +8,13 @@ import * as kiro from './lib/providers/kiro.mjs';
 import * as opencode from './lib/providers/opencode.mjs';
 
 const adapters = { claude, codex, cursor, grok, kiro, opencode };
+const workerRoles = ['build', 'phase', 'review', 'verify'];
+
+test('every supported harness can perform writable and read-only worker roles', () => {
+  for (const [name, adapter] of Object.entries(adapters)) {
+    assert.deepEqual(adapter.pipelineRoles, workerRoles, `${name} must support build, phase, review, and verify`);
+  }
+});
 
 for (const [name, adapter] of Object.entries(adapters)) {
   test(`installed ${name} capability probe is authentication-free and fail-closed`, { skip: !adapter.locate() && `${name} is not installed` }, () => {

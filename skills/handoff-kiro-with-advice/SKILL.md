@@ -1,6 +1,6 @@
 ---
 name: handoff-kiro-with-advice
-description: Delegate a bounded review, verify task to Kiro while allowing that worker to request nested read-only advice. Use when Kiro should execute the task and may consult another model without delegating more work.
+description: Delegate a bounded build, phase, review, verify task to Kiro while allowing that worker to request nested read-only advice. Use when Kiro should execute the task and may consult another model without delegating more work.
 ---
 
 # Hand off to Kiro and let it ask for advice
@@ -12,7 +12,7 @@ instructions file. Use only this exact root family:
 node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" run-with-advice \
   --caller-harness <codex|claude> \
   --harness kiro \
-  --mode <review|verify> \
+  --mode <build|phase|review|verify> \
   --cwd "$(pwd -P)" \
   --instructions <absolute-private-path>/instructions.txt \
   --result <absolute-private-path>/result.json

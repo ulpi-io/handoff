@@ -21,6 +21,8 @@
     "commands/grok-build-with-advice.md",
     "commands/grok-review.md",
     "commands/grok-review-with-advice.md",
+    "commands/kiro-build.md",
+    "commands/kiro-build-with-advice.md",
     "commands/kiro-review.md",
     "commands/kiro-review-with-advice.md",
     "commands/opencode-build.md",
@@ -87,5 +89,5 @@
     "skills/handoff-run-with-advice/SKILL.md",
     "skills/handoff-run-with-advice/agents/openai.yaml"
   ],
-  "digest": "sha256:a0591db62654eb4e94cac02f4727d6e3e43347678cac2f5cfc34e6f6ef72b4e3"
+  "digest": "sha256:2f19246ecfbe5294216a0beb66dc2c863cba3dfe2a87d4adf0e42c158ffd6849"
 }

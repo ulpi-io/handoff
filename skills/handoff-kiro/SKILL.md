@@ -1,6 +1,6 @@
 ---
 name: handoff-kiro
-description: Delegate a bounded review, verify task to Kiro without giving that worker any nested Handoff capability. Use when Kiro should execute independently and must not consult another model through Handoff.
+description: Delegate a bounded build, phase, review, verify task to Kiro without giving that worker any nested Handoff capability. Use when Kiro should execute independently and must not consult another model through Handoff.
 ---
 
 # Hand off to Kiro
@@ -12,7 +12,7 @@ instructions file. Use only this exact root family:
 node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" run \
   --caller-harness <codex|claude> \
   --harness kiro \
-  --mode <review|verify> \
+  --mode <build|phase|review|verify> \
   --cwd "$(pwd -P)" \
   --instructions <absolute-private-path>/instructions.txt \
   --result <absolute-private-path>/result.json

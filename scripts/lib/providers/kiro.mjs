@@ -1,4 +1,5 @@
-// Strict Kiro review adapter. Only canonical read-only tools are trusted; build/phase are not advertised.
+// Strict Kiro adapter. Writable roles receive only the canonical filesystem and Bash tools that
+// the request grants; read-only roles omit filesystem mutation tools.
 import { ContractError, PROVIDER_OUTPUT_SCHEMA_VERSION_V03, decodeUtf8 } from '../contracts.mjs';
 import { locateExecutable } from '../which.mjs';
 import { flagPreflight } from '../provider-preflight.mjs';
@@ -13,7 +14,7 @@ export function locate() {
   return locateExecutable('kiro-cli', ['~/.local/bin', '/opt/homebrew/bin', '/usr/local/bin']);
 }
 
-export const pipelineRoles = Object.freeze(['review', 'verify']);
+export const pipelineRoles = Object.freeze(['build', 'phase', 'review', 'verify']);
 const V03_ROLES = Object.freeze(['build', 'phase', 'review', 'verify']);
 
 export function pipelinePreflight(bin) {

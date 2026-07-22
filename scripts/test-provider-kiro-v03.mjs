@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pipelineInvocation, pipelinePolicy } from './lib/providers/kiro.mjs';
+import { pipelineInvocation, pipelinePolicy, pipelineRoles } from './lib/providers/kiro.mjs';
 
 test('Kiro maps permission-only build tools and native selection without trust-all', () => {
+  assert.deepEqual(pipelineRoles, ['build', 'phase', 'review', 'verify']);
   const invocation = pipelineInvocation({ bin: '/bin/kiro-cli', role: 'build', model: 'kiro-model', effort: 'max', bash: true });
   assert.equal(invocation.args.includes('--trust-tools=fs_read,fs_write,execute_bash'), true);
   assert.equal(invocation.args.includes('--trust-all-tools'), false);

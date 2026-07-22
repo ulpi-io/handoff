@@ -8,7 +8,7 @@ const skills = [
   'get-advice', 'handoff-run', 'handoff-run-with-advice',
   ...targets.flatMap((target) => [`handoff-${target}`, `handoff-${target}-with-advice`]),
 ].sort();
-const commandModes = Object.freeze({ claude: ['build', 'review'], codex: ['build', 'review'], cursor: ['build', 'review'], grok: ['build', 'review'], kiro: ['review'], opencode: ['build', 'review'] });
+const commandModes = Object.freeze({ claude: ['build', 'review'], codex: ['build', 'review'], cursor: ['build', 'review'], grok: ['build', 'review'], kiro: ['build', 'review'], opencode: ['build', 'review'] });
 const commands = Object.entries(commandModes).flatMap(([target, modes]) => modes.flatMap((mode) => [`${target}-${mode}.md`, `${target}-${mode}-with-advice.md`])).sort();
 
 test('shared skills expose exactly the generic and six paired provider families', () => {
@@ -44,7 +44,7 @@ test('provider skills route one exact target and one explicit root family', () =
   assert.doesNotMatch(genericEnabled, /nested[\s\S]{0,80}handoff\.mjs" run/u);
 });
 
-test('Claude command matrix has eleven plain and eleven paired with-advice routes', () => {
+test('Claude command matrix has twelve plain and twelve paired with-advice routes', () => {
   assert.deepEqual(readdirSync('commands').filter((name) => name.endsWith('.md')).sort(), commands);
   for (const [target, modes] of Object.entries(commandModes)) {
     for (const mode of modes) {

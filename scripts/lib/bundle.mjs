@@ -25,6 +25,8 @@ export const BUNDLE_FILES = Object.freeze([
   'commands/grok-build-with-advice.md',
   'commands/grok-review.md',
   'commands/grok-review-with-advice.md',
+  'commands/kiro-build.md',
+  'commands/kiro-build-with-advice.md',
   'commands/kiro-review.md',
   'commands/kiro-review-with-advice.md',
   'commands/opencode-build.md',

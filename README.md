@@ -132,7 +132,7 @@ custom-command directory, so Codex users invoke the shared skills above instead.
 |---|---|---|
 | Codex | `/handoff:codex-build`, `/handoff:codex-review` | `/handoff:codex-build-with-advice`, `/handoff:codex-review-with-advice` |
 | Grok | `/handoff:grok-build`, `/handoff:grok-review` | `/handoff:grok-build-with-advice`, `/handoff:grok-review-with-advice` |
-| Kiro | `/handoff:kiro-review` | `/handoff:kiro-review-with-advice` |
+| Kiro | `/handoff:kiro-build`, `/handoff:kiro-review` | `/handoff:kiro-build-with-advice`, `/handoff:kiro-review-with-advice` |
 | Claude | `/handoff:claude-build`, `/handoff:claude-review` | `/handoff:claude-build-with-advice`, `/handoff:claude-review-with-advice` |
 | OpenCode | `/handoff:opencode-build`, `/handoff:opencode-review` | `/handoff:opencode-build-with-advice`, `/handoff:opencode-review-with-advice` |
 | Cursor | `/handoff:cursor-build`, `/handoff:cursor-review` | `/handoff:cursor-build-with-advice`, `/handoff:cursor-review-with-advice` |
@@ -157,7 +157,8 @@ Handoff supports four task modes:
 | `verify` | Check a claim or completed change | Forbidden |
 
 Build and phase only succeed when Handoff observes a Git change. Review, verify, and advice are
-blocked if the supplied worktree changes. Kiro currently supports review and verify only.
+blocked if the supplied worktree changes. All supported worker harnesses, including Kiro, accept
+build, phase, review, and verify tasks.
 
 ## Choose the model, effort, and turn limit
 
