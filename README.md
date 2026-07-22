@@ -1,17 +1,15 @@
-# handoff v0.3.2
+# handoff v0.4.0
 
-`handoff` exposes one execution path: the versioned, fail-closed machine ABI. Every frontend
-prepares a strict request and invokes that same driver. There is no direct provider helper and no
-weaker fallback.
+Handoff lets an agent ask another model for read-only advice or delegate a bounded build/review
+through one fail-closed Node entrypoint. It supports Codex, Grok, Kiro, Claude, OpenCode, and Cursor.
 
-The wire schemas remain `handoff.*.v0.2`; the driver, bundle, and both plugin manifests are version
-`0.3.2`. This release fixes Kiro 2.13 native stdout-frame normalization while retaining stdin-only
-request privacy, and makes Grok's write/read tool split and 100-turn hard maximum explicit to
-orchestrators.
+Version 0.4 adds operation-aware v0.3 contracts, model/effort/turn selection receipts, explicit
+Bash/web/MCP grants, and an ephemeral supervisor-owned DAG. The v0.2 machine ABI remains available
+for existing integrations.
 
 ## Installation
 
-Handoff is available from the [Ulpi plugin marketplace](https://github.com/ulpi-io/marketplace).
+Install from the [Ulpi plugin marketplace](https://github.com/ulpi-io/marketplace).
 
 ### Claude Code
 
@@ -27,235 +25,217 @@ codex plugin marketplace add ulpi-io/marketplace
 codex plugin add handoff@ulpi
 ```
 
-Handoff resolves directly from this repository. To update it, push the change here, not to the
-marketplace repository.
+Each plugin resolves from its own repository. Updating Handoff means pushing to this repository, not
+the marketplace repository.
 
-## Slash commands
+## No global CLI
 
-Claude Code exposes each thin command frontend separately. Each command is on its own line for direct
-copy/paste:
+The plugin does not register a global `handoff` executable. Both hosts call the checked-in MJS file:
 
 ```text
-/handoff:codex-build <request>
-/handoff:codex-review <request>
-/handoff:grok-build <request>
-/handoff:grok-review <request>
-/handoff:claude-build <request>
-/handoff:claude-review <request>
-/handoff:opencode-build <request>
-/handoff:opencode-review <request>
-/handoff:cursor-build <request>
-/handoff:cursor-review <request>
-/handoff:kiro-review <request>
+node ${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs ...
 ```
 
-Codex exposes the single parameterized `$handoff-run` skill instead of duplicating those frontends.
-Specify the provider, role, worktree, and bounded request; every combination reaches the same driver.
+Prompt bytes live in a private instruction file, never provider argv.
 
-Codex, Grok, Claude, OpenCode, and Cursor support `build`, `phase`, `review`, and `verify` through the
-machine ABI. Kiro supports only `review` and `verify`; there is deliberately no Kiro build command.
-An unsupported role is rejected before request parsing or provider launch.
+## Get read-only advice
 
-## Absolute-path invocation
-
-The plugin does not install or promise a `handoff` executable on `PATH`. Invoke the checked-in Node
-entry points by absolute path.
-
-First put the literal task in a new private instructions file, then create the request:
+Any supported harness can ask any compatible target harness for advice:
 
 ```bash
-node /absolute/path/to/handoff/scripts/prepare-request.mjs \
-  --provider grok \
-  --role review \
-  --cwd /absolute/path/to/git-worktree \
-  --instructions /absolute/private/temp/instructions.txt \
+node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" advice \
+  --caller-harness codex \
+  --harness claude \
+  --cwd "$(pwd -P)" \
+  --instructions /absolute/private/instructions.txt \
+  --model fable \
+  --effort max \
   --max-turns 32 \
+  --bash true \
   --web-search true \
-  --request /absolute/private/temp/request.json
+  --result /absolute/private/advice-result.json
 ```
 
-Run the request and reserve a new result path:
+Advice is structurally read-only. The answer is `output.response`; evidence and findings remain
+separate arrays. Advice cannot gain write authority even when the target can build.
+
+`--caller-harness` is explicit root lineage metadata, not authentication. The selected provider
+uses its own native logged-in CLI or API-key precedence.
+
+## Run a higher-level handoff
+
+A Codex or Claude root can delegate `build`, `phase`, `review`, or `verify`:
 
 ```bash
-node /absolute/path/to/handoff/scripts/handoff.mjs run \
-  --provider grok \
-  --role review \
-  --cwd /absolute/path/to/git-worktree \
-  --request /absolute/private/temp/request.json \
-  --result /absolute/private/temp/result.json
+node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" run \
+  --caller-harness codex \
+  --harness grok \
+  --mode build \
+  --cwd "$(pwd -P)" \
+  --instructions /absolute/private/instructions.txt \
+  --model grok-code-fast \
+  --effort high \
+  --max-turns 24 \
+  --result /absolute/private/handoff-result.json
 ```
 
-Discover the current adapter matrix and installed-CLI preflight state with:
+Build/phase must produce a Git-observable change. Advice/review/verify block if the supplied
+worktree changes. Only driver exit `0` plus result status `succeeded` is green.
+
+## Nested calls and DAG lineage
+
+Each root starts one temporary supervisor. It owns capability tokens, budgets, lineage, dependency
+state, and an audit snapshot outside provider-writable paths. It is not a persistent daemon.
+
+```text
+root frontend
+  -> private v0.3 request
+  -> ephemeral supervisor (DAG + capabilities)
+  -> one machine executor
+  -> provider CLI
+       -> authenticated local IPC for a nested request
+       -> the same supervisor and machine executor
+```
+
+When `HANDOFF_SUPERVISOR_CONTEXT` is present, workers omit caller and root budgets:
 
 ```bash
-node /absolute/path/to/handoff/scripts/handoff.mjs capabilities --json
+node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" advice \
+  --harness codex \
+  --cwd "$(pwd -P)" \
+  --instructions /absolute/private/nested-instructions.txt \
+  --dependency advises:run-123 \
+  --result /absolute/private/nested-result.json
 ```
 
-The driver writes exactly one compact JSON object to stdout. On a run with a valid result path, the
-result file contains the byte-identical object. Bounded, credential-redacted diagnostics are written
-to stderr and retained in the normalized result; they never become extra stdout records. Unknown or duplicate flags, relative
-or unsafe paths, symlinks, malformed requests, unsupported roles, and existing result files fail
-closed.
+Dependencies are repeatable and typed as `requires:<run-id>`, `advises:<run-id>`, or
+`verifies:<run-id>`. The supervisor derives caller, root, parent, and depth. Workers cannot author
+those fields, widen parent grants, raise root budgets, repeat an ancestor intent, or bypass the
+machine executor. Cancellation terminalizes outstanding nodes and removes the local endpoint and
+runtime state.
 
-## Request and result contracts
+The same-UID threat model remains explicit: the capability protocol does not defend against a
+compromised coordinator or another process running as the same OS user. Use a container or VM when
+that actor is outside the trust boundary.
 
-[`contracts/v0.2/request.schema.json`](contracts/v0.2/request.schema.json) is the request authority.
-Unknown fields are rejected. A minimal non-Codex request is:
+## Selection defaults
+
+| Operation/target | Model | Effort | Max turns |
+|---|---|---|---|
+| Advice to Codex, Claude, or Kiro | provider default | `max` | Claude 32; others provider default |
+| Advice to Grok | provider default | provider default | 32 |
+| Advice to OpenCode or Cursor | provider default | provider default | provider default |
+| Handoff to any target | provider default | provider default | Grok/Claude 12; others provider default |
+
+Override with `--model`, `--effort`, and `--max-turns`. Explicit unsupported values reject before
+adapter lookup. Cursor has no exact effort control. Only Grok and Claude expose an exact 1–100 turn
+control.
+
+## Grants and budgets
+
+`--bash true|false` defaults true. `--web-search true|false` defaults false. An omitted
+`--mcp-config` means an empty MCP set. Nested grants can only narrow the parent's resolved grants.
+Unsupported combinations return non-green before provider launch.
+
+Root budgets and defaults are:
+
+| Flag | Default |
+|---|---:|
+| `--max-depth` | 3 |
+| `--max-nodes` | 16 |
+| `--max-advice-nodes` | 12 |
+| `--max-handoff-nodes` | 4 |
+| `--max-concurrency` | 4 |
+| `--root-timeout-ms` | 1,800,000 |
+| `--timeout-ms` | 600,000 |
+
+Nested commands cannot set these flags.
+
+## Private MCP descriptor
+
+`--mcp-config` accepts a strict `handoff.mcp.v0.3` JSON descriptor. It contains environment
+references, not literal secrets:
 
 ```json
 {
-  "schemaVersion": "handoff.request.v0.2",
-  "instructions": "Review the bounded change and return concrete findings.",
-  "timeoutMs": 600000
+  "schemaVersion": "handoff.mcp.v0.3",
+  "servers": [
+    {
+      "name": "local-docs",
+      "transport": "stdio",
+      "command": "/usr/bin/env",
+      "args": ["node", "/absolute/path/server.mjs"],
+      "env": { "TOKEN": { "fromEnv": "DOCS_MCP_TOKEN" } }
+    },
+    {
+      "name": "remote-search",
+      "transport": "http",
+      "url": "https://mcp.example.com/rpc",
+      "headers": { "Authorization": { "fromEnv": "SEARCH_MCP_AUTH" } }
+    }
+  ]
 }
 ```
 
-`timeoutMs` is optional and must be between 100 and 3,600,000 milliseconds. `maxTurns` is optional,
-must be an integer from 1 through 100, and is supported only by Grok and Claude; both default to 12
-when it is omitted and reject anything above the hard maximum of 100. The preparer exposes it as
-`--max-turns`. `webSearch` is an optional Grok-only
-boolean, defaults to false, and is exposed as `--web-search true|false`; enable it when the delegated
-task needs current external references. `model` and `effort` are optional non-option strings. The
-result's request hash is SHA-256 over the exact request-file bytes.
+The driver identity-checks the source, copies it mode `0600`, hash-binds the server list, translates
+it into an invocation-private provider configuration, and excludes secret bytes from prompts,
+results, and argv. Providers without a proved private configuration surface reject MCP.
 
-Codex additionally requires a `handoff.coordinator-approval.v0.2` object. The request preparer builds
-it automatically and binds the exact request, role, canonical cwd, and every applicable instruction
-file it can discover:
+## Result contract
 
-- the global `AGENTS.override.md` or `AGENTS.md` under `$CODEX_HOME`, falling back to `~/.codex`;
-- one applicable `AGENTS.override.md` or `AGENTS.md` at each directory from the Git root to cwd.
+v0.3 providers return `handoff.provider-output.v0.3` with `response`, `evidence`, `findings`, and
+`usage`. Handoff normalizes that into `handoff.result.v0.3` with:
 
-The driver independently reconstructs and verifies the repository chain, verifies every content
-digest, recomputes the approval subject hash, disables Codex's native project-document loading, and
-injects the approved rule set into the prompt. Global-rule completeness and coordinator identity are
-coordinator assertions because the driver has no signed external authority; the normalized policy
-states that limitation instead of claiming driver verification.
+- exact request-byte `requestHash` and lineage-independent semantic `intentHash`;
+- caller/target/mode, resolved selection and grant receipts, and provider policy;
+- `output.response` (advice answer or handoff summary), evidence, and findings;
+- Git before/after fingerprints, timing, usage, exit state, and redacted diagnostics;
+- the supervisor DAG snapshot when available.
 
-Providers must ultimately produce exactly one object matching
-[`contracts/v0.2/provider-output.schema.json`](contracts/v0.2/provider-output.schema.json). Native
-envelopes and event streams are normalized before that validation. Missing, malformed, noisy,
-oversized, prose-only, version-drifted, unknown-field, or unsafe-path output fails closed. The final
-object follows [`contracts/v0.2/result.schema.json`](contracts/v0.2/result.schema.json) and includes:
+Stdout is one compact JSON line and is byte-identical to the newly reserved result file. Driver exits
+are `0` success, `2` provider failure/block, `3` unavailable, `5` rejected input, `7` invalid output,
+`8` timeout, `9` cancellation, and `10` policy block.
 
-- schema, driver, and bundle versions plus the deterministic bundle digest;
-- provider id/version, role, and the policy actually selected;
-- exact request hash, status, provider/driver exit information, and signal state;
-- structured evidence/findings and observed usage or an explicit not-reported value;
-- deterministic before/after Git fingerprints and changed paths;
-- wall timing and bounded, redacted diagnostics.
+## Capability discovery
 
-Driver exits are `0` success, `2` provider failure/block, `3` unavailable or failed capability
-preflight, `5` rejected input, `7` invalid output, `8` timeout, `9` cancellation, and `10` policy
-block. A successful `build` or `phase` with no Git-observable change is blocked. A `review` or
-`verify` that changes the supplied worktree is blocked, even when the provider reports success.
+The original command remains byte-compatible:
 
-## Provider policies
+```bash
+node scripts/handoff.mjs capabilities --json
+```
 
-`pipeline.safe: true` means this repository implements the role and will launch it only after the
-installed binary proves the required local capability checks. It does not mean that merely finding a
-binary is enough: `pipeline.preflight.ok` is the runtime authority.
+Request the v0.3 selection/grant view explicitly:
 
-| Provider | Roles | Write roles | Read roles | Strict defaults and boundary |
-|---|---|---|---|---|
-| Codex | all four | native `workspace-write` | native `read-only` | ephemeral execution; user config and exec-policy rules ignored; approvals and sandbox network disabled; exact coordinator-bound AGENTS rules injected; no Git-check skip or sandbox bypass |
-| Grok | all four | named `workspace` plus `auto`; native default tools include Bash and editing, while configured MCP exposure is not Handoff-selected | named `read-only` plus headless `dontAsk`; Read/Grep always, WebSearch/WebFetch only by request; Bash, Edit, and MCP denied | cwd pinned; interactive plan mode disabled; orchestrator-selected 1–100 turns (default 12, hard maximum 100); web search is orchestrator-controlled and defaults off; current JSON envelope normalized before strict schema validation; subagents and memory disabled; both named profiles locally initialized during preflight |
-| Claude | all four | Bash, Edit, and Write exposed; Bash children use the native sandbox | only Read, Glob, and Grep exposed | `--bare`, `--safe-mode`, no persistence, no browser, strict empty MCP set, `dontAsk`, orchestrator-selected 1–100 turns (default 12), native JSON Schema; sandbox startup and unsandboxed Bash escape fail closed |
-| OpenCode | all four | Read, Glob, Grep, and Edit only | Read, Glob, and Grep only | temporary HOME/config/cache/state; project config, plugins, skills, MCP, Bash, web tools, subagents, LSP, questions, and external-directory access denied; exact resolved agent permissions preflighted; raw JSON events normalized |
-| Cursor | all four | target worktree passed through native `--allow-paths`; `--force` | target worktree passed through native `--readonly-paths`; no `--force` | isolated temporary sandbox workspace and HOME/XDG roots; preflight behavior-proves both target-path modes; one JSON result envelope; Git mutation blocking remains defense in depth |
-| Kiro | review, verify | unsupported | canonical `read`, `grep`, and `glob` only | uses the CLI's native credential precedence (active login, then `KIRO_API_KEY`); permission allowlist only; no write/shell tools, no trust-all mode, and no native filesystem-isolation claim |
+```bash
+node scripts/handoff.mjs capabilities --json --version v0.3
+```
 
-### What those guarantees mean
+See [the provider matrix](references/providers.md) for exact controls and isolation boundaries.
 
-[The Codex CLI reference](https://developers.openai.com/codex/cli/reference/) documents `exec` as
-the scripted/CI surface, and the
-[configuration reference](https://developers.openai.com/codex/config-reference/) defines the
-`read-only`/`workspace-write` sandbox modes, `approval_policy`, and workspace network control.
-Codex preflight requires its ephemeral/config-isolation, sandbox, cwd, output-schema, and
-last-message flags and proves the strict config keys used to disable native project documents, rules,
-approvals, and network. The driver never passes `--skip-git-repo-check`, `danger-full-access`, or a
-dangerous approval/sandbox bypass.
+## Legacy v0.2 ABI
 
-[Claude Code documents](https://code.claude.com/docs/en/cli-usage) bare mode, safe mode, explicit tool
-selection, no-session persistence, and JSON Schema output. Its
-[sandbox documentation](https://code.claude.com/docs/en/sandboxing) is specific: the OS sandbox
-constrains Bash and child processes, while built-in file tools remain governed by Claude's permission
-system. Handoff therefore does not call Claude's file tools a native OS sandbox. The adapter sets
-`sandbox.enabled`, `failIfUnavailable`, and `allowUnsandboxedCommands: false`. Admin-managed Claude
-settings still have higher precedence and are reported as honored; deployments that do not trust
-their managed policy must isolate the entire run externally. Bare mode also requires API-key or
-third-party-provider authentication rather than Claude's OAuth/keychain session.
+Existing callers can keep preparing `handoff.request.v0.2` with `scripts/prepare-request.mjs` and
+executing:
 
-[OpenCode documents](https://opencode.ai/docs/permissions/) granular allow/ask/deny permissions and
-[`opencode run --format json`](https://opencode.ai/docs/cli/) as raw JSON events. Handoff applies one
-exact deny-by-default named-agent policy, disables project configuration and external extensions,
-and preflights the resolved permission object before every run. This is provider tool-permission
-confinement, not OS filesystem isolation. Authentication and session data remain in OpenCode's data
-directory; temporary configuration roots are removed after the run.
+```bash
+node scripts/handoff.mjs run \
+  --provider grok --role review --cwd /absolute/worktree \
+  --request /absolute/private/request.json \
+  --result /absolute/private/result.json
+```
 
-[Cursor documents](https://docs.cursor.com/en/cli/headless) that `--force` applies headless changes
-while omission proposes them, and
-[its JSON format](https://docs.cursor.com/en/cli/reference/output-format) as one result envelope.
-The installed `sandbox run` surface additionally exposes `--allow-paths` and `--readonly-paths`.
-Handoff starts that sandbox from a temporary workspace, passes the target worktree through the exact
-role-specific path mode, and behavior-probes read/write results before launch. Review/verify therefore
-have a native read-only target boundary as well as the before/after Git block. Global Cursor config is
-isolated through temporary HOME/XDG roots; provider-native project rules may still be read. Network is
-enabled inside the outer sandbox so the nested provider can reach its API.
+The v0.2 request/provider/result shapes, strict path handling, exit mapping, Git evidence, and output
+normalization remain in place.
 
-[xAI's Grok sandbox table](https://docs.x.ai/build/enterprise#sandbox) defines `workspace` as
-read-everywhere with writes to cwd, `/tmp`, and `~/.grok/`, and `read-only` as read-everywhere with
-writes only to Grok state and temporary directories. These are repository write boundaries, not
-host-wide immutability or cwd-only reads. xAI documents Landlock on Linux and Seatbelt on macOS;
-child-network blocking for `read-only` is platform-dependent, so Handoff reports the narrower
-guarantee instead of universal network isolation.
-
-Kiro's [headless mode](https://kiro.dev/docs/cli/headless/) documents `KIRO_API_KEY` for portable
-automation, while its [authentication reference](https://kiro.dev/docs/cli/authentication/) gives an
-active browser session precedence over that variable. Handoff therefore lets the native CLI select
-either authenticated path instead of requiring an API key locally. The installed Kiro 2.13 CLI also
-retains its stdin-only one-shot behavior: Handoff streams the complete request through stdin and puts
-none of its bytes on argv. Kiro writes tool progress before an ANSI-decorated final `> ` response
-frame, so the adapter extracts that last native frame and exactly one terminal Handoff object before
-applying the unchanged strict JSON validator. Its
-[custom-agent tool configuration](https://kiro.dev/docs/cli/custom-agents/configuration-reference/)
-controls permission, not a kernel filesystem boundary. Kiro is therefore limited to review/verify
-with canonical `read`, `grep`, and `glob`. An external receipt is not accepted as a role upgrade, and the driver never falls
-back to trust-all tools.
-
-### Same-UID threat model
-
-A native provider sandbox constrains the delegated provider process according to that provider's
-actual policy. The Handoff protocol is not a boundary against the coordinator or another process
-running as the same OS user. Such a process can inspect or interfere with files outside the native
-sandbox's protection. Use a container, VM, or OS-level sandbox around the complete caller/provider
-pair when that actor is outside the trust boundary.
-
-## Git evidence
-
-The driver first verifies that cwd belongs to a Git worktree, then reads HEAD. Fingerprints cover
-HEAD, index records, staged and unstaged content, tracked and untracked files, deletions, renames,
-executable modes, and symlink targets. Git paths are consumed as NUL-delimited bytes, so spaces and
-newlines are not line-parsed or lost. Fingerprints are deterministic for the same repository state.
-
-Handoff does not create disposable worktrees. The coordinator must supply one when it needs rollback,
-concurrent-run isolation, or a stronger boundary than post-run mutation detection.
-
-## Deterministic bundle and hermetic tests
-
-[`bundle-digest.json`](bundle-digest.json) covers both manifests, every contract, the driver, request
-preparer, shared security modules, and all six provider adapters in stable path order. Every machine
-command fails closed when the checked-in digest drifts.
+## Validation
 
 ```bash
 node scripts/bundle-digest.mjs --check
 node --test scripts/test-pipeline-e2e.mjs
+node --test scripts/test-release-v04.mjs
 ```
 
-The E2E suite creates temporary Git repositories and six fake provider executables. It crosses real
-subprocess/request/result boundaries and exercises all advertised roles, timeouts, cancellation,
-schema drift, untracked-only changes, reviewer mutation, symlink/path traversal, noisy/prose-only and
-oversized output, configurable turn budgets, current and legacy Grok output shapes, policy preflight
-failures, and exit mapping. It needs no network, live provider, authentication, or global provider
-configuration.
+The installed capability suite performs local help/config/sandbox probes only. It makes no model
+call, authenticated web request, or ambient configuration mutation.
 
 MIT · ulpi.io

@@ -5,5 +5,5 @@ allowed-tools: [Bash, Read, Write, Grep, Glob]
 disable-model-invocation: true
 ---
 Use the **handoff-run** skill with provider `claude`, role `build`, cwd `$(pwd)`, and request
-`$ARGUMENTS`. Use only the strict prepare-request + `handoff.mjs run` flow. Report the normalized
+`$ARGUMENTS`. Use the exact root `handoff.mjs run --caller-harness claude --harness claude --mode build` flow. Report `output.response` and
 result and Git evidence; no Git-observable change is not completion.

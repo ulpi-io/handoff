@@ -4,5 +4,5 @@ argument-hint: "<what to review>"
 allowed-tools: [Bash, Read, Write, Grep, Glob]
 ---
 Use the **handoff-run** skill with provider `kiro`, role `review`, cwd `$(pwd)`, and request
-`$ARGUMENTS`. Use only the strict prepare-request + `handoff.mjs run` flow. Kiro receives `fs_read`
-only (never `execute_bash`); present normalized findings and block any observed mutation.
+`$ARGUMENTS`. Use the exact root `handoff.mjs run --caller-harness claude --harness kiro --mode review` flow. Kiro receives `fs_read`
+plus the resolved Bash grant; present normalized findings and block any observed mutation.

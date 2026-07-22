@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ulpi.io/handoff/contracts/v0.3/mcp.schema.json",
+  "title": "Handoff v0.3 private MCP descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "servers"],
+  "properties": {
+    "schemaVersion": { "const": "handoff.mcp.v0.3" },
+    "servers": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/server" }
+    }
+  },
+  "$defs": {
+    "environment": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": { "pattern": "^[A-Z_][A-Z0-9_]{0,127}$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fromEnv"],
+        "properties": {
+          "fromEnv": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]{0,127}$" }
+        }
+      }
+    },
+    "headers": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9-]{0,127}$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fromEnv"],
+        "properties": {
+          "fromEnv": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]{0,127}$" }
+        }
+      }
+    },
+    "server": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "transport", "command", "args", "env"],
+          "properties": {
+            "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+            "transport": { "const": "stdio" },
+            "command": { "type": "string", "minLength": 1, "maxLength": 4096 },
+            "args": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 4096 } },
+            "env": { "$ref": "#/$defs/environment" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "transport", "url", "headers"],
+          "properties": {
+            "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+            "transport": { "enum": ["http", "sse"] },
+            "url": { "type": "string", "pattern": "^https://", "maxLength": 4096 },
+            "headers": { "$ref": "#/$defs/headers" }
+          }
+        }
+      ]
+    }
+  }
+}

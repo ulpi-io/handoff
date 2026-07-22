@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ulpi.io/handoff/contracts/v0.3/result.schema.json",
+  "title": "Handoff v0.3 normalized result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "driverVersion", "bundleVersion", "bundleDigest", "operation", "caller", "target", "mode", "requestHash", "intentHash", "selection", "grants", "lineage", "status", "exit", "output", "git", "timing", "usage", "policy", "dag", "diagnostics"],
+  "properties": {
+    "schemaVersion": { "const": "handoff.result.v0.3" },
+    "driverVersion": { "const": "0.4.0" },
+    "bundleVersion": { "const": "0.4.0" },
+    "bundleDigest": { "$ref": "#/$defs/hash" },
+    "operation": { "enum": ["advice", "handoff"] },
+    "caller": { "$ref": "#/$defs/caller" },
+    "target": { "$ref": "#/$defs/target" },
+    "mode": { "type": ["string", "null"], "enum": ["build", "phase", "review", "verify", null] },
+    "requestHash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+    "intentHash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+    "selection": { "type": ["object", "null"] },
+    "grants": { "type": ["object", "null"] },
+    "lineage": { "type": ["object", "null"] },
+    "status": { "enum": ["succeeded", "blocked", "failed", "timed_out", "cancelled", "rejected", "not_run"] },
+    "exit": { "$ref": "#/$defs/exit" },
+    "output": { "$ref": "#/$defs/output" },
+    "git": { "type": "object" },
+    "timing": { "$ref": "#/$defs/timing" },
+    "usage": { "$ref": "#/$defs/usage" },
+    "policy": { "type": "object" },
+    "dag": { "anyOf": [{ "$ref": "dag.schema.json" }, { "type": "null" }] },
+    "diagnostics": { "$ref": "#/$defs/diagnostics" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "caller": { "type": "object", "additionalProperties": false, "required": ["harness", "provenance"], "properties": { "harness": { "enum": ["codex", "grok", "kiro", "claude", "opencode", "cursor"] }, "provenance": { "enum": ["root-asserted", "supervisor-derived"] } } },
+    "target": { "type": "object", "additionalProperties": false, "required": ["harness", "version"], "properties": { "harness": { "enum": ["codex", "grok", "kiro", "claude", "opencode", "cursor"] }, "version": { "type": ["string", "null"] } } },
+    "exit": { "type": "object", "additionalProperties": false, "required": ["driver", "provider", "signal", "timedOut", "cancelled"], "properties": { "driver": { "type": "integer" }, "provider": { "type": ["integer", "null"] }, "signal": { "type": ["string", "null"] }, "timedOut": { "type": "boolean" }, "cancelled": { "type": "boolean" } } },
+    "output": { "type": "object", "additionalProperties": false, "required": ["response", "evidence", "findings"], "properties": { "response": { "type": ["string", "null"], "maxLength": 65536 }, "evidence": { "type": "array" }, "findings": { "type": "array" } } },
+    "timing": { "type": "object", "additionalProperties": false, "required": ["startedAt", "finishedAt", "durationMs"], "properties": { "startedAt": { "type": "string", "format": "date-time" }, "finishedAt": { "type": "string", "format": "date-time" }, "durationMs": { "type": "integer", "minimum": 0 } } },
+    "usage": { "type": "object", "additionalProperties": false, "required": ["source", "inputTokens", "outputTokens", "totalTokens"], "properties": { "source": { "enum": ["provider-output", "provider-envelope", "not-reported", "not-observed"] }, "inputTokens": { "type": ["integer", "null"], "minimum": 0 }, "outputTokens": { "type": ["integer", "null"], "minimum": 0 }, "totalTokens": { "type": ["integer", "null"], "minimum": 0 } } },
+    "diagnostics": { "type": "object", "additionalProperties": false, "required": ["message", "providerStderr", "providerStdout", "truncated", "redactionCount"], "properties": { "message": { "type": ["string", "null"] }, "providerStderr": { "type": "string" }, "providerStdout": { "type": "string" }, "truncated": { "type": "boolean" }, "redactionCount": { "type": "integer", "minimum": 0 } } }
+  }
+}

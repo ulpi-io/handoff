@@ -1,7 +1,7 @@
 {
   "name": "handoff",
-  "version": "0.3.2",
-  "description": "Strict machine-only handoff to Codex, Grok, Claude, OpenCode, Cursor, and review-only Kiro. Every frontend uses the same fail-closed ABI with explicit policy preflight, structured results, and Git evidence.",
+  "version": "0.4.0",
+  "description": "Supervised cross-harness advice and handoff for Codex, Grok, Kiro, Claude, OpenCode, and Cursor, with pinned model selection, attenuated grants, bounded DAG lineage, structured results, and Git evidence through one bundled MJS authority.",
   "author": {
     "name": "ulpi.io",
     "url": "https://github.com/ulpi-io"
@@ -9,7 +9,7 @@
   "homepage": "https://github.com/ulpi-io/plugin-handoff",
   "repository": "https://github.com/ulpi-io/plugin-handoff",
   "license": "MIT",
-  "keywords": ["handoff", "delegate", "codex", "grok", "kiro", "claude", "opencode", "cursor", "review", "build", "agents"],
+  "keywords": ["handoff", "advice", "delegate", "codex", "grok", "kiro", "claude", "opencode", "cursor", "review", "build", "dag", "agents"],
   "commands": "./commands",
   "skills": "./skills"
 }

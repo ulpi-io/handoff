@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ulpi.io/handoff/contracts/v0.3/request.schema.json",
+  "title": "Handoff v0.3 operation request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "operation", "caller", "target", "mode", "cwd", "instructions", "selection", "grants", "lineage", "budgets", "intentHash"],
+  "properties": {
+    "schemaVersion": { "const": "handoff.request.v0.3" },
+    "operation": { "enum": ["advice", "handoff"] },
+    "caller": { "$ref": "#/$defs/caller" },
+    "target": { "$ref": "#/$defs/target" },
+    "mode": { "type": ["string", "null"], "enum": ["build", "phase", "review", "verify", null] },
+    "cwd": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "instructions": { "type": "string", "minLength": 1, "maxLength": 2000000 },
+    "selection": { "$ref": "#/$defs/selection" },
+    "grants": { "$ref": "#/$defs/grants" },
+    "lineage": { "$ref": "#/$defs/lineage" },
+    "budgets": { "$ref": "#/$defs/budgets" },
+    "intentHash": { "$ref": "#/$defs/hash" },
+    "coordinatorApproval": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "operation": { "const": "advice" } } },
+      "then": {
+        "properties": {
+          "mode": { "const": null },
+          "grants": { "properties": { "resolved": { "properties": { "write": { "const": false } } } } }
+        }
+      },
+      "else": { "properties": { "mode": { "enum": ["build", "phase", "review", "verify"] } } }
+    }
+  ],
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "harness": { "enum": ["codex", "grok", "kiro", "claude", "opencode", "cursor"] },
+    "caller": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["harness", "provenance"],
+      "properties": {
+        "harness": { "$ref": "#/$defs/harness" },
+        "provenance": { "enum": ["root-asserted", "supervisor-derived"] }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["harness"],
+      "properties": { "harness": { "$ref": "#/$defs/harness" } }
+    },
+    "requestedSelection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model", "effort", "maxTurns"],
+      "properties": {
+        "model": { "type": ["string", "null"] },
+        "effort": { "type": ["string", "null"] },
+        "maxTurns": { "type": ["integer", "null"], "minimum": 1, "maximum": 100 }
+      }
+    },
+    "resolvedSelection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model", "effort", "maxTurns"],
+      "properties": {
+        "model": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "effort": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "maxTurns": { "type": ["integer", "null"], "minimum": 1, "maximum": 100 }
+      }
+    },
+    "provenanceSelection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model", "effort", "maxTurns"],
+      "properties": {
+        "model": { "enum": ["explicit", "provider-default"] },
+        "effort": { "enum": ["explicit", "operation-default", "provider-default"] },
+        "maxTurns": { "enum": ["explicit", "operation-default", "provider-default"] }
+      }
+    },
+    "selection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requested", "resolved", "provenance"],
+      "properties": {
+        "requested": { "$ref": "#/$defs/requestedSelection" },
+        "resolved": { "$ref": "#/$defs/resolvedSelection" },
+        "provenance": { "$ref": "#/$defs/provenanceSelection" }
+      }
+    },
+    "grantBooleansRequested": {
+      "type": "object", "additionalProperties": false,
+      "required": ["bash", "webSearch", "mcp"],
+      "properties": { "bash": { "type": "boolean" }, "webSearch": { "type": "boolean" }, "mcp": { "type": "boolean" } }
+    },
+    "grantBooleansResolved": {
+      "type": "object", "additionalProperties": false,
+      "required": ["bash", "webSearch", "mcp", "write"],
+      "properties": { "bash": { "type": "boolean" }, "webSearch": { "type": "boolean" }, "mcp": { "type": "boolean" }, "write": { "type": "boolean" } }
+    },
+    "grantProvenance": {
+      "type": "object", "additionalProperties": false,
+      "required": ["bash", "webSearch", "mcp", "write"],
+      "properties": {
+        "bash": { "enum": ["explicit", "operation-default", "parent-attenuated"] },
+        "webSearch": { "enum": ["explicit", "operation-default", "parent-attenuated"] },
+        "mcp": { "enum": ["explicit", "operation-default", "parent-attenuated"] },
+        "write": { "enum": ["mode-derived", "parent-attenuated"] }
+      }
+    },
+    "mcpReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["digest", "servers"],
+      "properties": {
+        "digest": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "servers": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 64 } }
+      }
+    },
+    "grants": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requested", "resolved", "provenance", "mcp"],
+      "properties": {
+        "requested": { "$ref": "#/$defs/grantBooleansRequested" },
+        "resolved": { "$ref": "#/$defs/grantBooleansResolved" },
+        "provenance": { "$ref": "#/$defs/grantProvenance" },
+        "mcp": { "$ref": "#/$defs/mcpReceipt" }
+      }
+    },
+    "dependency": {
+      "type": "object", "additionalProperties": false,
+      "required": ["runId", "type"],
+      "properties": { "runId": { "type": "string", "minLength": 1, "maxLength": 128 }, "type": { "enum": ["requires", "advises", "verifies"] } }
+    },
+    "lineage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["rootRunId", "runId", "parentRunId", "depth", "dependencies"],
+      "properties": {
+        "rootRunId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "runId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "parentRunId": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+        "depth": { "type": "integer", "minimum": 0, "maximum": 32 },
+        "dependencies": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/dependency" } }
+      }
+    },
+    "limits": {
+      "type": "object", "additionalProperties": false,
+      "required": ["maxDepth", "maxNodes", "maxAdviceNodes", "maxHandoffNodes", "maxConcurrency", "rootTimeoutMs", "timeoutMs"],
+      "properties": {
+        "maxDepth": { "type": "integer", "minimum": 0, "maximum": 32 },
+        "maxNodes": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "maxAdviceNodes": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "maxHandoffNodes": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "maxConcurrency": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "rootTimeoutMs": { "type": "integer", "minimum": 100, "maximum": 86400000 },
+        "timeoutMs": { "type": "integer", "minimum": 100, "maximum": 3600000 }
+      }
+    },
+    "remaining": {
+      "type": "object", "additionalProperties": false,
+      "required": ["nodes", "adviceNodes", "handoffNodes"],
+      "properties": {
+        "nodes": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "adviceNodes": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "handoffNodes": { "type": "integer", "minimum": 0, "maximum": 256 }
+      }
+    },
+    "budgets": {
+      "type": "object", "additionalProperties": false,
+      "required": ["limits", "remaining"],
+      "properties": { "limits": { "$ref": "#/$defs/limits" }, "remaining": { "$ref": "#/$defs/remaining" } }
+    }
+  }
+}

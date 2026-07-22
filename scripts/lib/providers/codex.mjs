@@ -19,7 +19,7 @@ export function pipelinePreflight(bin) {
     helpArgs: ['exec', '--help'],
     requiredFlags: [
       '--config', '--strict-config', '--sandbox', '--cd', '--ephemeral', '--ignore-user-config', '--ignore-rules',
-      '--output-schema', '--output-last-message',
+      '--disable', '--output-schema', '--output-last-message',
     ],
   });
   if (!flags.ok) return flags;
@@ -60,6 +60,36 @@ const CODEX_CONFIG_OVERRIDES = Object.freeze([
   'sandbox_workspace_write.network_access=false',
 ]);
 
+function mcpOverrides(descriptor) {
+  if (!descriptor) return { config: [], env: {} };
+  const config = [];
+  const env = {};
+  for (const server of descriptor.servers) {
+    const prefix = `mcp_servers.${server.name}`;
+    if (server.transport === 'stdio') {
+      config.push(`${prefix}.command=${JSON.stringify(server.command)}`);
+      config.push(`${prefix}.args=${JSON.stringify(server.args)}`);
+      const names = [];
+      for (const [target, reference] of Object.entries(server.env)) {
+        if (process.env[reference.fromEnv] === undefined) throw new Error(`MCP environment reference '${reference.fromEnv}' is unavailable`);
+        env[target] = process.env[reference.fromEnv];
+        names.push(target);
+      }
+      if (names.length) config.push(`${prefix}.env_vars=${JSON.stringify(names)}`);
+    } else {
+      config.push(`${prefix}.url=${JSON.stringify(server.url)}`);
+      const headerNames = Object.keys(server.headers);
+      if (headerNames.some((name) => name.toLowerCase() !== 'authorization') || headerNames.length > 1) throw new Error('Codex private HTTP MCP supports only an Authorization environment reference');
+      if (headerNames.length === 1) {
+        const source = server.headers[headerNames[0]].fromEnv;
+        if (process.env[source] === undefined) throw new Error(`MCP environment reference '${source}' is unavailable`);
+        config.push(`${prefix}.bearer_token_env_var=${JSON.stringify(source)}`);
+      }
+    }
+  }
+  return { config, env };
+}
+
 export function pipelinePolicy(role, coordinatorApproval = null) {
   const sandbox = role === 'build' || role === 'phase' ? 'workspace-write' : 'read-only';
   const policy = {
@@ -87,16 +117,20 @@ export function pipelinePolicy(role, coordinatorApproval = null) {
   return policy;
 }
 
-export function pipelineInvocation({ bin, role, cwd, model, schemaFile, lastMsgFile, coordinatorApproval }) {
+export function pipelineInvocation({ bin, role, cwd, model, effort, schemaFile, lastMsgFile, coordinatorApproval, mcpDescriptor, bash = true }) {
   if (!coordinatorApproval) throw new Error('Codex pipeline invocation requires coordinator approval binding');
   const policy = pipelinePolicy(role, coordinatorApproval);
+  const mcp = mcpOverrides(mcpDescriptor);
   const args = [
     'exec', '--ephemeral', '--ignore-user-config', '--ignore-rules', '--strict-config',
     ...CODEX_CONFIG_OVERRIDES.flatMap((value) => ['--config', value]),
+    ...mcp.config.flatMap((value) => ['--config', value]),
     '--sandbox', policy.filesystem, '--cd', cwd,
     '--output-schema', schemaFile, '--output-last-message', lastMsgFile,
   ];
   if (model) args.push('--model', model);
+  if (effort) args.push('--config', `model_reasoning_effort=${JSON.stringify(effort)}`);
+  if (!bash) args.push('--disable', 'shell_tool');
   args.push('-');
-  return { bin, args, stdin: 'prompt', resultSource: { type: 'file', path: lastMsgFile }, policy };
+  return { bin, args, env: mcp.env, stdin: 'prompt', resultSource: { type: 'file', path: lastMsgFile }, policy: { ...policy, mcpServers: mcpDescriptor?.servers.map((server) => server.name) ?? [] } };
 }

@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -31,7 +31,8 @@ function proveSandbox(bin, cwd, version, canWrite) {
     "let targetRead = false; let targetWrite = false;",
     "try { process.chdir(targetDir); fs.readdirSync('.'); targetRead = true; } catch {}",
     "try { fs.writeFileSync(target, 'probe'); targetWrite = true; } catch {}",
-    "process.stdout.write(JSON.stringify({ targetRead, targetWrite }));",
+    "const expectedWrite = process.env.HANDOFF_CURSOR_EXPECT_WRITE === '1';",
+    "if (!targetRead || targetWrite !== expectedWrite) process.exit(23);",
   ].join(' ');
   try {
     const probe = spawnSync(bin, [
@@ -50,11 +51,8 @@ function proveSandbox(bin, cwd, version, canWrite) {
         TERM: 'dumb',
       },
     });
-    let observed = null;
-    try { observed = JSON.parse(probe.stdout); } catch { /* fail below */ }
     const targetExists = existsSync(target);
-    if (probe.error || probe.status !== 0 || observed?.targetRead !== true
-      || observed?.targetWrite !== canWrite || targetExists !== canWrite) {
+    if (probe.error || probe.status !== 0 || targetExists !== canWrite) {
       return {
         ok: false,
         version,
@@ -71,7 +69,7 @@ function proveSandbox(bin, cwd, version, canWrite) {
 export function pipelinePreflight(bin, { cwd = process.cwd(), role = null, roles = null } = {}) {
   const flags = flagPreflight(bin, {
     helpArgs: ['--help'],
-    requiredFlags: ['--force', '--output-format', '--print'],
+    requiredFlags: ['--approve-mcps', '--force', '--output-format', '--print'],
   });
   if (!flags.ok) return flags;
   if (cwd.includes(',')) {
@@ -121,7 +119,33 @@ export function pipelinePolicy(role) {
   };
 }
 
-export function pipelineInvocation({ bin, role, cwd, tempRoot, model }) {
+function cursorMcp(descriptor, home) {
+  if (!descriptor) return [];
+  const mcpServers = {};
+  for (const server of descriptor.servers) {
+    if (server.transport === 'stdio') {
+      const env = {};
+      for (const [target, reference] of Object.entries(server.env)) {
+        if (process.env[reference.fromEnv] === undefined) throw new Error(`MCP environment reference '${reference.fromEnv}' is unavailable`);
+        env[target] = process.env[reference.fromEnv];
+      }
+      mcpServers[server.name] = { command: server.command, args: server.args, env };
+    } else {
+      const headers = {};
+      for (const [target, reference] of Object.entries(server.headers)) {
+        if (process.env[reference.fromEnv] === undefined) throw new Error(`MCP environment reference '${reference.fromEnv}' is unavailable`);
+        headers[target] = process.env[reference.fromEnv];
+      }
+      mcpServers[server.name] = { url: server.url, headers };
+    }
+  }
+  const directory = join(home, '.cursor');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, 'mcp.json'), `${JSON.stringify({ mcpServers })}\n`, { mode: 0o600, flag: 'wx' });
+  return ['--approve-mcps'];
+}
+
+export function pipelineInvocation({ bin, role, cwd, tempRoot, model, mcpDescriptor }) {
   if (cwd.includes(',')) throw new Error('Cursor sandbox path flags cannot safely encode a cwd containing a comma');
   const policy = pipelinePolicy(role);
   const sandboxRoot = join(tempRoot, 'cursor-sandbox');
@@ -132,6 +156,7 @@ export function pipelineInvocation({ bin, role, cwd, tempRoot, model }) {
   const nested = [bin, '-p', '--output-format', 'json'];
   if (writable(role)) nested.push('--force');
   if (model) nested.push('--model', model);
+  nested.push(...cursorMcp(mcpDescriptor, home));
   const args = [
     'sandbox', 'run', '--sandbox', '--network',
     writable(role) ? '--allow-paths' : '--readonly-paths', cwd,
@@ -150,7 +175,7 @@ export function pipelineInvocation({ bin, role, cwd, tempRoot, model }) {
     },
     stdin: 'prompt',
     resultSource: { type: 'stdout' },
-    policy,
+    policy: { ...policy, mcpServers: mcpDescriptor?.servers.map((server) => server.name) ?? [] },
   };
 }
 

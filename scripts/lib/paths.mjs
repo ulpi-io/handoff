@@ -4,11 +4,17 @@ import {
   existsSync,
   lstatSync,
   openSync,
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
   realpathSync,
   statSync,
+  unlinkSync,
   writeSync,
+  writeFileSync,
 } from 'node:fs';
-import { basename, dirname, isAbsolute, parse, resolve, sep } from 'node:path';
+import { tmpdir } from 'node:os';
+import { basename, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 
 export class PathBoundaryError extends Error {
   constructor(message) {
@@ -106,4 +112,37 @@ export function closeReservedResult(reservation) {
   if (reservation?.fd === null || reservation?.fd === undefined) return;
   try { closeSync(reservation.fd); } catch { /* best-effort close */ }
   reservation.fd = null;
+}
+
+export function createSupervisorRuntimeDirectory() {
+  const base = join(tmpdir(), 'handoff-supervisors');
+  mkdirSync(base, { recursive: true, mode: 0o700 });
+  const baseStat = lstatSync(base);
+  if (baseStat.isSymbolicLink() || !baseStat.isDirectory() || (baseStat.mode & 0o077) !== 0 || baseStat.uid !== process.getuid?.()) {
+    throw new PathBoundaryError('supervisor runtime base must be a current-user mode-0700 directory');
+  }
+  const directory = mkdtempSync(join(base, `handoff-v03-${process.getuid?.() ?? 'uid'}-${process.pid}-`));
+  const stat = lstatSync(directory);
+  if (!stat.isDirectory() || (stat.mode & 0o077) !== 0) throw new PathBoundaryError('supervisor runtime directory is not private');
+  return directory;
+}
+
+export function atomicWritePrivateFile(path, bytes) {
+  validateLexicalAbsolute(path, 'private state path');
+  const parent = dirname(path);
+  const parentStat = lstatSync(parent);
+  if (parentStat.isSymbolicLink() || !parentStat.isDirectory() || (parentStat.mode & 0o077) !== 0 || parentStat.uid !== process.getuid?.()) {
+    throw new PathBoundaryError('private state parent must be a current-user mode-0700 directory');
+  }
+  if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new PathBoundaryError('private state path must not be a symbolic link');
+  const temporary = join(parent, `.${basename(path)}.${process.pid}.${Date.now()}.tmp`);
+  try {
+    writeFileSync(temporary, bytes, { mode: 0o600, flag: 'wx' });
+    renameSync(temporary, path);
+    const written = lstatSync(path);
+    if (!written.isFile() || written.isSymbolicLink() || (written.mode & 0o077) !== 0) throw new PathBoundaryError('private state file lost its safety properties');
+  } catch (error) {
+    try { unlinkSync(temporary); } catch { /* exact temporary path only */ }
+    throw error;
+  }
 }

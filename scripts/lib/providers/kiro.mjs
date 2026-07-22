@@ -1,5 +1,5 @@
 // Strict Kiro review adapter. Only canonical read-only tools are trusted; build/phase are not advertised.
-import { ContractError, PROVIDER_OUTPUT_SCHEMA_VERSION, decodeUtf8 } from '../contracts.mjs';
+import { ContractError, PROVIDER_OUTPUT_SCHEMA_VERSION, PROVIDER_OUTPUT_SCHEMA_VERSION_V03, decodeUtf8 } from '../contracts.mjs';
 import { locateExecutable } from '../which.mjs';
 import { flagPreflight } from '../provider-preflight.mjs';
 
@@ -7,35 +7,39 @@ export const id = 'kiro';
 export const displayName = 'Kiro';
 export const installHint = 'Install the Kiro CLI (`kiro-cli`) and authenticate it.';
 const ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/gu;
-const HANDOFF_OBJECT_START = /\{\s*"schemaVersion"\s*:\s*"handoff\.provider-output\.v0\.2"/gu;
+const HANDOFF_OBJECT_START = /\{\s*"schemaVersion"\s*:\s*"handoff\.provider-output\.v0\.[23]"/gu;
 
 export function locate() {
   return locateExecutable('kiro-cli', ['~/.local/bin', '/opt/homebrew/bin', '/usr/local/bin']);
 }
 
 export const pipelineRoles = Object.freeze(['review', 'verify']);
+const V03_ROLES = Object.freeze(['build', 'phase', 'review', 'verify']);
 
 export function pipelinePreflight(bin) {
   return flagPreflight(bin, {
     helpArgs: ['chat', '--help'],
-    requiredFlags: ['--no-interactive', '--trust-tools', '--wrap'],
+    requiredFlags: ['--effort', '--model', '--no-interactive', '--require-mcp-startup', '--trust-tools', '--wrap'],
   });
 }
 
-export function pipelinePolicy(role) {
-  if (!pipelineRoles.includes(role)) throw new Error(`Kiro pipeline role '${role}' is unsupported`);
+export function pipelinePolicy(role, { bash } = {}) {
+  if (!V03_ROLES.includes(role)) throw new Error(`Kiro pipeline role '${role}' is unsupported`);
+  const legacy = bash === undefined;
   return {
     enforcement: 'tool-permission-allowlist',
-    filesystem: 'permission-only',
+    filesystem: role === 'build' || role === 'phase' ? 'permission-only-workspace-write' : 'permission-only-read-only-intent',
     nativeFilesystemIsolation: false,
     headlessAuthentication: 'active Kiro session or KIRO_API_KEY, using native CLI precedence',
-    toolAllowlist: ['read', 'grep', 'glob'],
+    toolAllowlist: legacy ? ['read', 'grep', 'glob'] : ['fs_read', ...((role === 'build' || role === 'phase') ? ['fs_write'] : []), ...(bash ? ['execute_bash'] : [])],
+    mutationGuarantee: 'final-state-detection-only',
   };
 }
 
-export function pipelineInvocation({ bin, role, model, effort }) {
-  const policy = pipelinePolicy(role);
-  const args = ['chat', '--no-interactive', '--wrap', 'never', '--trust-tools=read,grep,glob'];
+export function pipelineInvocation({ bin, role, model, effort, bash, mcpDescriptor }) {
+  if (mcpDescriptor) throw new Error('Kiro private MCP isolation was not proved by this installed adapter');
+  const policy = pipelinePolicy(role, { bash });
+  const args = ['chat', '--no-interactive', '--wrap', 'never', `--trust-tools=${policy.toolAllowlist.join(',')}`];
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
   return {
@@ -66,7 +70,7 @@ export function pipelineExtractResult(raw) {
   try {
     const exact = JSON.parse(candidate);
     if (exact && typeof exact === 'object' && !Array.isArray(exact)
-      && exact.schemaVersion === PROVIDER_OUTPUT_SCHEMA_VERSION) {
+      && [PROVIDER_OUTPUT_SCHEMA_VERSION, PROVIDER_OUTPUT_SCHEMA_VERSION_V03].includes(exact.schemaVersion)) {
       return { bytes: Buffer.from(candidate), usage: null, usageSource: null };
     }
   } catch { /* try the provider's observed preamble plus terminal-object form below */ }
@@ -100,7 +104,7 @@ export function pipelineExtractResult(raw) {
     try {
       const parsed = JSON.parse(object);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        && parsed.schemaVersion === PROVIDER_OUTPUT_SCHEMA_VERSION) terminalObjects.push(object);
+        && [PROVIDER_OUTPUT_SCHEMA_VERSION, PROVIDER_OUTPUT_SCHEMA_VERSION_V03].includes(parsed.schemaVersion)) terminalObjects.push(object);
     } catch { /* downstream remains fail-closed */ }
   }
   if (terminalObjects.length !== 1) {

@@ -8,6 +8,7 @@ import {
   MAX_MAX_TURNS,
   MIN_MAX_TURNS,
   PROVIDER_OUTPUT_SCHEMA_VERSION,
+  PROVIDER_OUTPUT_SCHEMA_VERSION_V03,
   decodeUtf8,
 } from '../contracts.mjs';
 import { locateExecutable } from '../which.mjs';
@@ -62,13 +63,18 @@ export function pipelinePreflight(bin) {
   return flags;
 }
 
-export function pipelinePolicy(role, maxTurns = DEFAULT_MAX_TURNS, webSearch = false) {
+export function pipelinePolicy(role, maxTurns = DEFAULT_MAX_TURNS, webSearch = false, bash = role === 'build' || role === 'phase') {
   const writable = role === 'build' || role === 'phase';
-  const toolAllowlist = webSearch
-    ? ['Read', 'Grep', 'WebSearch', 'WebFetch']
-    : ['Read', 'Grep'];
+  const toolAllowlist = [
+    'Read', 'Grep',
+    ...(writable ? ['Edit'] : []),
+    ...(bash ? ['Bash'] : []),
+    ...(webSearch ? ['WebSearch', 'WebFetch'] : []),
+  ];
   const toolDenylist = [
-    'Bash(*)', 'Edit(*)', 'MCPTool(*)',
+    ...(!bash ? ['Bash(*)'] : []),
+    ...(!writable ? ['Edit(*)'] : []),
+    'MCPTool(*)',
     ...(webSearch ? [] : ['WebFetch(*)']),
   ];
   return {
@@ -85,10 +91,8 @@ export function pipelinePolicy(role, maxTurns = DEFAULT_MAX_TURNS, webSearch = f
     maxTurnsConfigurable: true,
     maxTurnsMinimum: MIN_MAX_TURNS,
     maxTurnsMaximum: MAX_MAX_TURNS,
-    ...(writable ? {} : {
-      toolAllowlist,
-      toolDenylist,
-    }),
+    toolAllowlist,
+    toolDenylist,
     network: webSearch
       ? 'provider web search and fetch enabled; child-network policy remains sandbox-profile-defined'
       : writable ? 'sandbox-profile-default' : 'blocked-for-children-on-supported-linux-only',
@@ -97,9 +101,10 @@ export function pipelinePolicy(role, maxTurns = DEFAULT_MAX_TURNS, webSearch = f
   };
 }
 
-export function pipelineInvocation({ bin, role, cwd, promptFile, model, effort, schemaJson, maxTurns, webSearch }) {
+export function pipelineInvocation({ bin, role, cwd, promptFile, model, effort, schemaJson, maxTurns, webSearch, bash }) {
   const writable = role === 'build' || role === 'phase';
-  const policy = pipelinePolicy(role, maxTurns ?? DEFAULT_MAX_TURNS, webSearch ?? false);
+  const legacy = bash === undefined;
+  const policy = pipelinePolicy(role, maxTurns ?? DEFAULT_MAX_TURNS, webSearch ?? false, bash ?? writable);
   const args = [
     '--prompt-file', promptFile,
     '--cwd', cwd,
@@ -111,7 +116,7 @@ export function pipelineInvocation({ bin, role, cwd, promptFile, model, effort, 
     '--verbatim',
   ];
   if (!policy.webSearch) args.push('--disable-web-search');
-  if (!writable) {
+  if (!(legacy && writable)) {
     args.push('--tools', policy.toolAllowlist.join(','));
     for (const rule of policy.toolDenylist) args.push('--deny', rule);
     if (policy.webSearch) args.push('--allow', 'WebFetch(*)');
@@ -147,7 +152,7 @@ export function pipelineExtractResult(raw) {
   catch { throw new ContractError('Grok output must be exactly one JSON object', 'invalid_provider_output'); }
 
   // Preserve compatibility with Grok releases that emitted the schema object directly.
-  if (plainObject(envelope) && envelope.schemaVersion === PROVIDER_OUTPUT_SCHEMA_VERSION) {
+  if (plainObject(envelope) && [PROVIDER_OUTPUT_SCHEMA_VERSION, PROVIDER_OUTPUT_SCHEMA_VERSION_V03].includes(envelope.schemaVersion)) {
     return { bytes: Buffer.from(text.trim()), usage: null, usageSource: null };
   }
 

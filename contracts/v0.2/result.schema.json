@@ -7,8 +7,8 @@
   "required": ["schemaVersion", "driverVersion", "bundleVersion", "bundleDigest", "provider", "role", "policy", "requestHash", "status", "exit", "output", "git", "timing", "usage", "diagnostics"],
   "properties": {
     "schemaVersion": { "const": "handoff.result.v0.2" },
-    "driverVersion": { "const": "0.3.2" },
-    "bundleVersion": { "const": "0.3.2" },
+    "driverVersion": { "const": "0.4.0" },
+    "bundleVersion": { "const": "0.4.0" },
     "bundleDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "provider": {
       "type": "object",

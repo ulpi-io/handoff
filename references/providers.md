@@ -1,129 +1,81 @@
-# Provider adapter reference (handoff v0.3.2)
+# Provider adapter reference (handoff v0.4.0)
 
-Every provider below is reached only through `scripts/handoff.mjs run`. Capabilities advertise the
-roles implemented by the strict adapter; a run still requires the installed binary's preflight to
-pass. There is no alternate invocation path.
+Every provider is reached through `scripts/handoff.mjs` and the same machine executor. “Supported”
+still requires that the installed CLI's authentication-free preflight passes for the requested mode.
 
-## Invocation matrix
+## Selection, grants, and confinement
 
-| Boundary | Codex | Grok | Claude | OpenCode | Cursor | Kiro |
-|---|---|---|---|---|---|---|
-| Binary | `codex` | `grok` | `claude` | `opencode` | `cursor-agent` | `kiro-cli` |
-| Roles | all four | all four | all four | all four | all four | review, verify |
-| Prompt transport | stdin | private temporary file | stdin | stdin | stdin | stdin only; no prompt bytes on argv |
-| Write role | `workspace-write` | `workspace` | write tools plus native Bash sandbox | permission-scoped Edit, no Bash | target passed with native `--allow-paths`, `--force` | rejected |
-| Read role | `read-only` | `read-only` | Read/Glob/Grep only | Read/Glob/Grep only | target passed with native `--readonly-paths`, no `--force` | canonical `read`, `grep`, and `glob` only |
-| Provider result | native schema + last-message file | strict `structuredOutput` inside one JSON envelope | native schema in JSON envelope | normalized raw JSON events | strict object inside one JSON envelope | strict prompt object |
-| Cwd pin | CLI flag plus child cwd | CLI flag plus child cwd | child cwd | `--dir` plus child cwd | child cwd and outer sandbox workspace | child cwd |
-| Persistence | ephemeral | no memory flag; provider state writable | no session persistence | session/auth data retained | provider-native state may persist | provider-native state may persist |
+| Target | Model | Effort | Turns | Bash | Web | Private MCP | Write boundary | Read-only boundary |
+|---|---|---|---|---|---|---|---|---|
+| Codex | yes | yes | native default | on/off | no | stdio; constrained HTTP auth | native `workspace-write` | native `read-only` |
+| Grok | yes | yes | 1–100 | on/off | yes | no proved isolated surface | native `workspace` | native `read-only` |
+| Claude | yes | yes | 1–100 | on/off | yes | yes | file tools plus fail-closed Bash sandbox | no write tools; Bash deny-write sandbox; final Git check |
+| OpenCode | yes | variant | native default | on/off | yes | yes | permission-only Edit/Bash | permission-only tools plus final Git check |
+| Cursor | yes | no exact control | native default | on; `false` rejects | no | isolated temporary HOME | native target `--allow-paths` when behavior probe passes | native target `--readonly-paths` |
+| Kiro | yes | yes | native default | on/off | no | no proved isolated surface | permission-only `fs_write`/`execute_bash` | permission-only `fs_read`/optional Bash plus final Git check |
 
-“All four” means `build`, `phase`, `review`, and `verify`.
+Provider-default selections are recorded rather than guessed. Explicit unsupported effort, turn,
+web, MCP, or Bash controls reject; Handoff never silently substitutes another model or permission.
 
-## Preflight authority
-
-- Codex: required exec flags plus strict recognition of the exact approval, project-document,
-  root-marker, and network configuration keys.
-- Grok: both exact named sandbox profiles initialize and reach the local structured-result parser.
-- Claude: every required control flag plus bare-mode structured-result parsing. Runtime sandbox
-  failure also blocks the run.
-- OpenCode: global/run flags plus byte-equivalent resolved permissions for the selected named agent.
-- Cursor: main and sandbox flags plus behavior probes proving the target repository is readable but
-  not writable through `--readonly-paths`, and writable through `--allow-paths`.
-- Kiro: non-interactive chat and exact tool-trust flag support. Authentication remains native to the
-  CLI: an active browser session takes precedence, followed by `KIRO_API_KEY`.
-
-Missing binaries, flag drift, failed probes, and unsupported roles are `not_run`; no provider process
-is launched for the task.
-
-## Policy details
+## Adapter notes
 
 ### Codex
 
-[Codex's CLI reference](https://developers.openai.com/codex/cli/reference/) identifies `exec` as its
-scripted/CI surface. Handoff uses `exec --ephemeral --ignore-user-config --ignore-rules --strict-config`, disables approvals
-and sandbox network, pins cwd, and selects `workspace-write` or `read-only`. Native AGENTS loading is
-disabled only after strict config-key preflight. The coordinator-approved global and repository
-AGENTS chain is then injected in the prompt and recorded in the result. Repository completeness is
-driver-verified; global completeness and coordinator identity are explicit coordinator assertions.
-
-The adapter never uses a Git-repository-check skip, `danger-full-access`, or a dangerous
-approval/sandbox bypass.
+Codex runs `exec` with ephemeral/user-config/rules isolation, strict configuration, coordinator-bound
+AGENTS rules, approvals disabled, and an explicit native sandbox. `model_reasoning_effort` is a
+strict config value. `bash=false` disables `shell_tool`. MCP servers become strict invocation config;
+environment values remain in child env rather than argv. Codex web search is not enabled by Handoff.
 
 ### Grok
 
-Grok uses the built-in `workspace` and `read-only` profiles with cwd pinned, an orchestrator-selected
-1–100 turn bound (default 12, hard maximum 100), native JSON Schema, and subagents and memory
-disabled. Build/phase use `workspace` plus `auto` and do not receive the read-role tool denylist, so
-Bash and editing remain available through Grok's native defaults; configured MCP exposure is not
-selected by Handoff. Web search is a
-hashed orchestrator decision that defaults off. When enabled, read roles add `WebSearch` and
-`WebFetch`; when disabled, the adapter passes `--disable-web-search` and denies web fetches. Read
-roles use headless `dontAsk`, always register `Read` and `Grep`, and explicitly deny Bash, edits, and
-MCP tools; the native `read-only` sandbox remains the filesystem boundary.
-All roles disable Grok's interactive plan mode so a machine run must execute to a terminal result.
-The adapter normalizes Grok's current one-object JSON envelope through `structuredOutput`, preserves
-valid token usage, and still accepts the older direct schema object. When Grok reports a native
-structured-output projection error, the adapter independently validates the envelope's exact `text`
-response against Handoff's strict schema. Non-ABI envelope metadata may vary; missing candidate
-output, prose, noise, and malformed inner objects still fail closed. Per xAI's
-[sandbox table](https://docs.x.ai/build/enterprise#sandbox), both profiles can read beyond cwd.
-`workspace` can write cwd, temporary directories, and Grok state; `read-only` retains only temporary
-and Grok-state writes. Child-network enforcement differs by platform and is reported narrowly.
+Grok uses its exact `workspace` or `read-only` named sandbox, pinned cwd, explicit tools and denies,
+configurable web search, and 1–100 turns. Plan mode, subagents, and memory are disabled. Handoff
+normalizes both direct provider objects and the current `structuredOutput`/`text` envelope. Private,
+invocation-isolated MCP configuration has not been proved, so MCP rejects.
 
 ### Claude
 
-Claude uses bare and safe modes, strict empty MCP configuration, disabled skills/browser/session
-persistence, `dontAsk`, an explicit tool list, an orchestrator-selected 1–100 turn bound (default
-12), and native JSON Schema output. Write roles expose Bash/Edit/Write/Read/Glob/Grep. Read roles
-expose only Read/Glob/Grep.
-
-Claude's [native sandbox](https://code.claude.com/docs/en/sandboxing) applies to Bash and its children;
-the built-in file tools remain permission-controlled. The adapter enables the sandbox, requires
-startup success, and disables the unsandboxed-command escape hatch. Admin-managed settings remain in
-force and outrank command-line settings, so the result reports them as honored rather than ignored.
-Bare mode uses API-key or supported third-party-provider authentication, not the normal OAuth/keychain
-session.
+Claude uses bare/safe modes, no session persistence or browser, native JSON Schema, explicit tools,
+and strict private MCP configuration. Read-only roles can receive Bash, but Bash runs with
+fail-if-unavailable sandbox settings and cwd writes denied. Built-in file tools remain governed by
+Claude permissions, so Handoff does not claim whole-agent native filesystem isolation. WebSearch and
+WebFetch are included only when requested.
 
 ### OpenCode
 
-OpenCode runs with a temporary HOME and XDG config/cache/state, `--pure`, project configuration
-disabled, and an exact named-agent policy. Every unspecified permission is denied. Bash, web fetch,
-web search, subagents, skills, LSP, questions, MCP, and external-directory access are denied. Write
-roles add only Edit; read roles deny it. The driver parses each raw event, enforces one session and a
-terminal text result, and aggregates observed usage across every complete step-finish event.
-
-This is a preflighted OpenCode permission boundary, not OS filesystem isolation. The provider data
-directory remains available for authentication and session state.
+OpenCode runs with temporary config roots, project config/extensions disabled, and a deny-by-default
+named-agent permission object. Bash, web tools, editing, and approved MCP are independently resolved.
+The permission object is not an OS sandbox; results say `final-state-detection-only` where relevant.
+Raw JSON events are normalized into one provider object.
 
 ### Cursor
 
-The entire nested headless agent runs under the installed CLI's `sandbox run` command from an isolated
-temporary workspace and HOME/XDG tree. Write roles pass the target with `--allow-paths` and use
-`--force`; read roles pass it with `--readonly-paths` and omit `--force`. Preflight proves both path
-boundaries by behavior, not merely flag names. Deterministic post-run mutation blocking remains a
-second enforcement layer.
-
-The adapter accepts only Cursor's documented single success envelope and validates its result string
-against the provider schema. Network is enabled for the nested agent so it can reach the model API.
+Cursor runs the headless agent inside `sandbox run` from a temporary HOME/XDG tree. The target is
+passed through `--allow-paths` for writes or `--readonly-paths` for read-only work, and each requested
+mode is behavior-probed before launch. Some installed Cursor versions virtualize or discard target
+writes; those versions correctly return `not_run` for write modes. Only the approved temporary
+`~/.cursor/mcp.json` exists and `--approve-mcps` therefore approves that bounded set. Cursor has no
+exact effort, web, or Bash-disable control.
 
 ### Kiro
 
-Kiro is review/verify-only. Kiro documents `KIRO_API_KEY` for portable automation, but its native
-authentication precedence uses an active browser session first and then the environment key. Handoff
-accepts either native path. Installed Kiro 2.13 retains the stdin-only invocation used by the proven
-Ulpi helper, so the complete request is piped with no positional prompt bytes. Kiro writes tool
-progress before an ANSI-decorated final `> ` response frame even under `--no-interactive`; the adapter
-extracts that last native frame and exactly one terminal Handoff object before strict JSON validation.
-Missing objects, multiple objects, Markdown fences, and noise after the terminal object fail closed.
-Its invocation trusts exactly canonical `read`, `grep`, and `glob`; write and shell are absent. Per Kiro's
-[headless documentation](https://kiro.dev/docs/cli/headless/) and
-[tool configuration reference](https://kiro.dev/docs/cli/custom-agents/configuration-reference/),
-this is a tool-permission allowlist, not native filesystem isolation. Build/phase are rejected and no
-receipt or fallback can upgrade them.
+Kiro uses its native active-session-first, `KIRO_API_KEY`-second authentication precedence. Handoff
+passes model and effort, uses stdin-only one-shot input, never uses trust-all, and selects canonical
+`fs_read`, `fs_write`, and `execute_bash` tools by mode/grant. These are permissions, not native
+filesystem isolation. Current private custom-agent MCP isolation is not advertised. ANSI/tool-progress
+frames are normalized before strict provider-output validation.
+
+## Nested-source authority
+
+All targets receive `HANDOFF_SUPERVISOR_CONTEXT` only while participating in a v0.3 root run. The
+context contains a local endpoint and bounded capability token, never a DAG path. Nested requests go
+back to the supervisor; provider CLIs are never invoked recursively by the worker. Higher-level
+`run` remains limited to a derived Codex or Claude caller, while `advice` accepts every derived
+caller/compatible target pair.
 
 ## Shared enforcement
 
-All adapters use the same strict request/result schemas, output limit, timeout/cancellation mapping,
-redaction, Git fingerprints, build-change requirement, and review-mutation block. Provider-native
-sandboxing is not a boundary against the coordinator or another same-UID process. External
-container/VM/OS confinement is required when either is outside the trust boundary.
+All adapters share request/result validation, exact request and intent hashes, private-path checks,
+bounded output, timeout/cancellation mapping, redaction, deterministic Git fingerprints,
+build-without-change blocking, and read-only mutation blocking. Provider sandboxing is not a
+boundary against the coordinator or another same-UID process.

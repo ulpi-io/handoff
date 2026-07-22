@@ -1,7 +1,7 @@
 {
   "name": "handoff",
-  "version": "0.3.2",
-  "description": "Strict machine-only handoff to Codex, Grok, Claude, OpenCode, Cursor, and review-only Kiro. Every frontend uses the same fail-closed ABI with explicit policy preflight, structured results, and Git evidence.",
+  "version": "0.4.0",
+  "description": "Supervised cross-harness advice and handoff for Codex, Grok, Kiro, Claude, OpenCode, and Cursor, with pinned model selection, attenuated grants, bounded DAG lineage, structured results, and Git evidence through one bundled MJS authority.",
   "author": {
     "name": "ulpi.io",
     "url": "https://github.com/ulpi-io"
@@ -9,20 +9,20 @@
   "homepage": "https://github.com/ulpi-io/plugin-handoff",
   "repository": "https://github.com/ulpi-io/plugin-handoff",
   "license": "MIT",
-  "keywords": ["handoff", "delegate", "codex", "grok", "kiro", "claude", "opencode", "cursor", "review", "build", "agents"],
+  "keywords": ["handoff", "advice", "delegate", "codex", "grok", "kiro", "claude", "opencode", "cursor", "review", "build", "dag", "agents"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Handoff",
-    "shortDescription": "Strictly delegate build and review through one machine ABI",
-    "longDescription": "Hand off one bounded build, phase, review, or verification through a single strict machine ABI. Codex, Grok, Claude, OpenCode, and Cursor have explicit role policies and fail-closed preflight; Kiro is review/verify-only. Prompt bytes stay off argv and normalized results carry deterministic Git evidence.",
+    "shortDescription": "Get advice or delegate through a supervised DAG",
+    "longDescription": "Ask any supported harness for read-only advice, or hand off one bounded build, phase, review, or verification from Codex or Claude. Every node uses the same fail-closed MJS authority with pinned model and effort receipts, attenuated Bash/web/MCP grants, ephemeral supervised lineage, deterministic Git evidence, and structured results.",
     "developerName": "ulpi.io",
     "category": "Developer Tools",
     "capabilities": ["Machine API", "Write"],
     "websiteURL": "https://github.com/ulpi-io/plugin-handoff",
     "defaultPrompt": [
+      "Ask Claude Fable for architecture advice at max effort",
       "Have Codex review the diff in src/auth",
-      "Let Grok build the parser in src/parse.ts",
-      "Have Claude review this module, read-only"
+      "Let Grok build the parser in src/parse.ts"
     ],
     "brandColor": "#6366F1"
   }

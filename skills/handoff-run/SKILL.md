@@ -1,123 +1,75 @@
 ---
 name: handoff-run
-description: |
-  Strict frontend for every Handoff provider-role command. Prepare a versioned request file and
-  invoke the one machine driver for Codex, Grok, Kiro, Claude, OpenCode, or Cursor. Use when the user
-  asks to hand off or delegate a bounded build, phase, review, or verification. Never invoke a
-  provider directly.
-allowed-tools: [Bash, Read, Write, Grep, Glob]
+description: Delegate one bounded build, phase, review, or verification from Codex or Claude to Codex, Grok, Kiro, Claude, OpenCode, or Cursor through Handoff's supervised machine ABI. Use when the user asks another harness to execute or independently verify work, with explicit model, effort, turn, Bash, web, MCP, lineage, and budget controls. Never invoke a provider directly.
 ---
 
-# handoff-run
+# Run a handoff
 
-Every slash command is a frontend to the same strict file ABI. There is no second execution path.
+Use only the bundled `scripts/handoff.mjs` entrypoint. There is no global CLI, alias, direct provider
+helper, or weaker execution route.
 
-<EXTREMELY-IMPORTANT>
-- Fail closed. `not_run`, `rejected`, `failed`, `blocked`, `timed_out`, and `cancelled` are never green.
-- Do not invoke a provider CLI directly and do not use removed `--verb` or `--prompt-file` driver flags.
-- Never add trust-all, approval bypass, sandbox bypass, skip-repository-check, resume, or shared-session flags.
-- Put request bytes in a private file. Never interpolate them into shell or provider argv.
-- Build/phase success requires a Git-observable change. Review/verify block if the worktree changes.
-- One bounded request per run.
-</EXTREMELY-IMPORTANT>
+Write a self-contained request to a private `instructions.txt`: one goal, exact scope, testable
+acceptance criteria, validation commands, and explicit guardrails. Use `build|phase` only when a
+Git-observable change is required; use `review|verify` for read-only work.
 
-Inputs are a provider, role, absolute Git worktree, user request, an optional native turn budget,
-and an explicit Grok web-search decision. Supported roles are:
+## Root command
 
-- Codex, Grok, Claude, OpenCode, Cursor: `build|phase|review|verify`
-- Kiro: `review|verify`
-
-## 1. Scope the request
-
-Create a self-contained instruction document with a one-sentence goal, exact in-scope paths,
-machine-checkable acceptance criteria, and guardrails. Reviews explicitly forbid changes and request
-concrete findings. Do not weaken or reinterpret the user's constraints.
-
-Select `build` or `phase` only when the delegated task must create a Git-observable change. Select
-`review` or `verify` when mutation is forbidden. Do not mislabel a Bash-only test or compilation as a
-write role merely to obtain tools; report an unsupported provider-role capability instead.
-
-For Grok and Claude, select `maxTurns` from 1 through 100 when the task needs a budget other than the
-12-turn default. The hard maximum is exactly 100 turns; never request 101 or more. An explicit
-user-provided budget within that range wins. Use a larger value for scope that cannot realistically
-complete in 12 provider turns; do not shrink the task merely to preserve the default. Do not set
-`maxTurns` for providers without a native turn control.
-
-For Grok, set `webSearch` to true only when the task needs current external references or the user
-explicitly asks for web research. It defaults to false. Do not enable it speculatively, and do not
-set it for providers without Handoff's native web-search control.
-
-## 2. Prepare the versioned request
-
-Create a private temporary directory with `mktemp -d`. Use the Write tool to save the instruction
-document as `instructions.txt` inside it; do not use `echo`, a here-document, or shell interpolation.
-Use physical absolute paths for cwd and every file.
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/prepare-request.mjs" \
-  --provider <provider> --role <role> --cwd "$(pwd -P)" \
-  --instructions <absolute-temp-dir>/instructions.txt \
-  --request <absolute-temp-dir>/request.json
-```
-
-For Grok and Claude, add `--max-turns <1-100>` before `--request` when selecting a non-default budget.
-The request helper validates the same schema as the driver and stores that budget in the hashed
-request; omission preserves the 12-turn default. For Codex it also binds the exact request, role,
-cwd, and applicable AGENTS.md chain into a coordinator approval. The request path must not exist.
-For Grok, add `--web-search true` when the scoped task requires web sources; explicit false or
-omission keeps WebSearch and WebFetch unavailable.
-
-## 3. Invoke the one driver
+Only a Codex or Claude root may start a higher-level handoff:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" run \
-  --provider <provider> --role <role> --cwd "$(pwd -P)" \
-  --request <absolute-temp-dir>/request.json \
-  --result <absolute-temp-dir>/result.json
+  --caller-harness <codex|claude> \
+  --harness <codex|grok|kiro|claude|opencode|cursor> \
+  --mode <build|phase|review|verify> \
+  --cwd "$(pwd -P)" \
+  --instructions <absolute-private-path>/instructions.txt \
+  --result <absolute-private-path>/result.json
 ```
 
-The driver emits exactly one JSON object on stdout and writes the byte-identical object to the new
-result path. Diagnostics are fields in that bounded, redacted result; provider diagnostics never
-become extra stdout objects. Check both process exit and result status.
+The caller value is asserted lineage metadata, not host authentication. The selected target still
+uses its native logged-in CLI or API-key precedence.
 
-## 4. Report ground truth
+## Nested command
 
-- Build/phase: report status, provider policy, baseline/head, and `git.changedFiles`. A successful
-  provider response with no Git-observable change is blocked.
-- Review/verify: present `output.findings` and relevant evidence. Any worktree mutation is blocked.
-- Preflight or execution failure: report the exact bounded diagnostic and say the handoff did not
-  complete. Do not substitute a local opinion.
+When `HANDOFF_SUPERVISOR_CONTEXT` exists, omit `--caller-harness` and every root budget flag. The
+ephemeral supervisor derives the caller from the parent target, authenticates the request, applies
+grant attenuation, owns the DAG, and routes the child through the same machine executor.
 
-Delete only the exact temporary directory created for this run after the result has been consumed.
+```bash
+node "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/scripts/handoff.mjs" run \
+  --harness <target-harness> \
+  --mode <build|phase|review|verify> \
+  --cwd "$(pwd -P)" \
+  --instructions <absolute-private-path>/instructions.txt \
+  --result <absolute-private-path>/result.json
+```
 
-## Fixed provider policies
+Nested `run` is accepted only when the derived caller is Codex or Claude. Add repeatable typed
+dependencies as `--dependency requires:<run-id>`, `advises:<run-id>`, or `verifies:<run-id>`.
 
-- Codex: ephemeral, user config and native rules disabled, coordinator-approved AGENTS.md injected,
-  approval policy never, native `workspace-write` for build/phase and `read-only` for review/verify.
-- Grok: exact named sandbox, cwd pinned, orchestrator-selected 1–100 turns (default 12, hard maximum
-  100), current JSON-envelope normalization, orchestrator-controlled web search (default off), and
-  subagents and memory disabled. Build/phase use `workspace` plus `auto` and retain Grok's native
-  default tools, including Bash and editing; Handoff does not select their configured MCPs.
-  Review/verify use `read-only` plus `dontAsk`, expose Read/Grep (and explicitly requested web tools),
-  and deny Bash, Edit, and MCP tools.
-- Claude: bare and safe modes, no persistence, strict empty MCP config, orchestrator-selected 1–100
-  turns (default 12), JSON Schema output, explicit tools, and fail-closed native Bash sandboxing for
-  write roles.
-- OpenCode: temporary HOME/config roots, project configuration disabled, external plugins and skills
-  disabled, an exact resolved named-agent permission preflight, raw-event normalization, and no Bash,
-  web, subagents, or external-directory access. This is tool-permission confinement, not an OS sandbox.
-- Cursor: the whole headless agent runs inside Cursor's preflighted native command sandbox from an
-  isolated temporary workspace. Build/phase receive the target as `--allow-paths` and use `--force`;
-  review/verify receive it as `--readonly-paths` and omit `--force`. Git mutation blocking remains
-  defense in depth.
-- Kiro: review/verify only, with canonical `read`, `grep`, and `glob`, never write or shell. Do not
-  demand an API key merely because the run is non-interactive: Kiro's native credential precedence
-  uses an active browser session first and `KIRO_API_KEY` second. API-key usage consumes the same Kiro
-  subscription credits; do not describe it as separate per-call API billing. Use the installed CLI's
-  stdin-only one-shot path: the complete request is piped on stdin and no prompt bytes go on argv.
-  Kiro's tool-progress output, final ANSI plus `> ` response frame, and single terminal Handoff
-  object are normalized before strict JSON validation. This is a tool allowlist, not native
-  filesystem isolation.
+## Optional controls
 
-All policies retain the same-UID limitation: the provider sandbox is not a boundary against the
-coordinator or another process running as the same OS user.
+- `--model <provider-model>`; omission records `provider-default`.
+- `--effort <provider-supported-effort>`; handoff omission records `provider-default`.
+- `--max-turns <1-100>` for Grok and Claude; handoff default is 12.
+- `--bash true|false`; default is true.
+- `--web-search true|false`; default is false and true requires an exact provider control.
+- `--mcp-config <absolute-path>`; only invocation-private, adapter-proved MCP mappings are accepted.
+
+Root-only defaults are depth 3, 16 total nodes, 12 advice nodes, 4 handoff nodes, concurrency 4,
+30-minute root timeout, and 10-minute per-node timeout. Override with `--max-depth`, `--max-nodes`,
+`--max-advice-nodes`, `--max-handoff-nodes`, `--max-concurrency`, `--root-timeout-ms`, and
+`--timeout-ms`.
+
+Unsupported combinations fail before provider launch. Never add trust-all, approval bypass,
+sandbox bypass, skip-repository-check, resume, ambient MCP, or shared-session flags.
+
+## Result discipline
+
+Stdout and the new result file are byte-identical. `output.response` is the handoff summary;
+evidence and findings remain structured. Check process exit, result status, selection/grant receipts,
+policy, Git evidence, and DAG state.
+
+Only exit `0` plus `succeeded` is green. Build/phase success without a Git-observable change blocks.
+Advice/review/verify mutation blocks. Treat `not_run`, `rejected`, `blocked`, `failed`, `timed_out`,
+and `cancelled` as non-green and report the bounded diagnostic instead of substituting local work.

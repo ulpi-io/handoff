@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   ContractError,
@@ -23,18 +25,23 @@ function writable(role) {
   return role === 'build' || role === 'phase';
 }
 
-function toolsFor(role) {
-  return writable(role) ? BUILD_TOOLS : REVIEW_TOOLS;
+function toolsFor(role, { bash = writable(role), webSearch = false, mcpDescriptor = null } = {}) {
+  return [
+    ...(writable(role) ? BUILD_TOOLS.filter((tool) => tool !== 'Bash') : REVIEW_TOOLS),
+    ...(bash ? ['Bash'] : []),
+    ...(webSearch ? ['WebSearch', 'WebFetch'] : []),
+    ...(mcpDescriptor ? mcpDescriptor.servers.map((server) => `mcp__${server.name}__*`) : []),
+  ];
 }
 
-function settingsJson() {
+function settingsJson({ cwd = null, canWrite = false } = {}) {
   return JSON.stringify({
     sandbox: {
       enabled: true,
       failIfUnavailable: true,
       allowUnsandboxedCommands: false,
       excludedCommands: [],
-      filesystem: { allowRead: [], allowWrite: [], denyRead: [], denyWrite: [] },
+      filesystem: { allowRead: cwd ? [cwd] : [], allowWrite: canWrite && cwd ? [cwd] : [], denyRead: [], denyWrite: !canWrite && cwd ? [cwd] : [] },
       network: { allowedDomains: [] },
     },
   });
@@ -82,7 +89,7 @@ export function pipelinePreflight(bin) {
   return flags;
 }
 
-export function pipelinePolicy(role, maxTurns = DEFAULT_MAX_TURNS) {
+export function pipelinePolicy(role, maxTurns = DEFAULT_MAX_TURNS, { bash = writable(role), webSearch = false, mcpDescriptor = null } = {}) {
   const canWrite = writable(role);
   return {
     enforcement: canWrite ? 'native-bash-sandbox-plus-file-tool-permissions' : 'read-only-tool-allowlist',
@@ -95,27 +102,53 @@ export function pipelinePolicy(role, maxTurns = DEFAULT_MAX_TURNS) {
     // Claude documents the native sandbox as a Bash/child-process boundary. Built-in file tools
     // remain permission-controlled, so the provider run as a whole is not labeled OS-isolated.
     nativeFilesystemIsolation: false,
-    nativeBashSandbox: canWrite,
-    fileToolConfinement: canWrite ? 'permission-controlled file tools; managed policy may alter effective scope' : 'no edit, write, or bash tool exposed',
-    toolAllowlist: [...toolsFor(role)],
-    webSearch: false,
+    nativeBashSandbox: bash,
+    fileToolConfinement: canWrite ? 'permission-controlled file tools plus fail-closed Bash sandbox' : (bash ? 'read-only file tool surface plus fail-closed Bash deny-write sandbox' : 'no edit, write, or bash tool exposed'),
+    toolAllowlist: [...toolsFor(role, { bash, webSearch, mcpDescriptor })],
+    webSearch,
     subagents: false,
     memory: false,
     maxTurns,
     maxTurnsConfigurable: true,
     maxTurnsMinimum: MIN_MAX_TURNS,
     maxTurnsMaximum: MAX_MAX_TURNS,
-    network: canWrite ? 'Bash child network denied unless managed policy permits domains; provider API remains reachable' : 'no network-capable tool exposed',
+    network: webSearch ? 'Claude WebSearch/WebFetch enabled; Bash child network remains sandbox-denied' : (bash ? 'Bash child network denied; provider API remains reachable' : 'no network-capable tool exposed'),
     structuredResult: 'native JSON Schema in Claude JSON envelope',
   };
 }
 
-export function pipelineInvocation({ bin, role, model, effort, schemaJson, maxTurns }) {
-  const policy = pipelinePolicy(role, maxTurns ?? DEFAULT_MAX_TURNS);
+function materializeMcp(descriptor, tempRoot) {
+  if (!descriptor) return EMPTY_MCP;
+  const mcpServers = {};
+  for (const server of descriptor.servers) {
+    if (server.transport === 'stdio') {
+      const env = {};
+      for (const [target, reference] of Object.entries(server.env)) {
+        if (process.env[reference.fromEnv] === undefined) throw new Error(`MCP environment reference '${reference.fromEnv}' is unavailable`);
+        env[target] = process.env[reference.fromEnv];
+      }
+      mcpServers[server.name] = { command: server.command, args: server.args, env };
+    } else {
+      const headers = {};
+      for (const [target, reference] of Object.entries(server.headers)) {
+        if (process.env[reference.fromEnv] === undefined) throw new Error(`MCP environment reference '${reference.fromEnv}' is unavailable`);
+        headers[target] = process.env[reference.fromEnv];
+      }
+      mcpServers[server.name] = { type: server.transport, url: server.url, headers };
+    }
+  }
+  const path = join(tempRoot, 'claude-mcp.json');
+  writeFileSync(path, `${JSON.stringify({ mcpServers })}\n`, { mode: 0o600, flag: 'wx' });
+  return path;
+}
+
+export function pipelineInvocation({ bin, role, cwd, tempRoot, model, effort, schemaJson, maxTurns, bash = writable(role), webSearch = false, mcpDescriptor }) {
+  const policy = pipelinePolicy(role, maxTurns ?? DEFAULT_MAX_TURNS, { bash, webSearch, mcpDescriptor });
   const tools = policy.toolAllowlist.join(',');
+  const mcpConfig = materializeMcp(mcpDescriptor, tempRoot);
   const args = [
-    '--bare', '--safe-mode', '--settings', settingsJson(),
-    '--strict-mcp-config', '--mcp-config', EMPTY_MCP,
+    '--bare', '--safe-mode', '--settings', settingsJson({ cwd, canWrite: writable(role) }),
+    '--strict-mcp-config', '--mcp-config', mcpConfig,
     '--disable-slash-commands', '--no-session-persistence', '--no-chrome',
     '--permission-mode', 'dontAsk', '--tools', tools, '--allowedTools', tools,
     '--max-turns', String(policy.maxTurns), '-p', '--output-format', 'json', '--json-schema', schemaJson,

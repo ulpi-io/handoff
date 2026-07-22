@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ulpi.io/handoff/contracts/v0.3/capabilities.schema.json",
+  "title": "Handoff v0.3 capabilities",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "driverVersion", "bundleVersion", "bundleDigest", "operations", "modes", "defaults", "providers"],
+  "properties": {
+    "schemaVersion": { "const": "handoff.capabilities.v0.3" },
+    "driverVersion": { "const": "0.4.0" },
+    "bundleVersion": { "const": "0.4.0" },
+    "bundleDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "operations": { "const": ["advice", "handoff"] },
+    "modes": { "const": ["build", "phase", "review", "verify"] },
+    "defaults": {
+      "type": "object", "additionalProperties": false,
+      "required": ["maxDepth", "maxNodes", "maxAdviceNodes", "maxHandoffNodes", "maxConcurrency", "rootTimeoutMs", "timeoutMs"],
+      "properties": {
+        "maxDepth": { "const": 3 }, "maxNodes": { "const": 16 }, "maxAdviceNodes": { "const": 12 },
+        "maxHandoffNodes": { "const": 4 }, "maxConcurrency": { "const": 4 },
+        "rootTimeoutMs": { "const": 1800000 }, "timeoutMs": { "const": 600000 }
+      }
+    },
+    "providers": { "type": "array", "minItems": 6, "maxItems": 6, "items": { "$ref": "#/$defs/provider" } }
+  },
+  "$defs": {
+    "provider": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "preflight", "selection", "grants", "isolation"],
+      "properties": {
+        "id": { "enum": ["codex", "grok", "kiro", "claude", "opencode", "cursor"] },
+        "preflight": {
+          "type": "object", "additionalProperties": false,
+          "required": ["installed", "ok", "version", "reason"],
+          "properties": { "installed": { "type": "boolean" }, "ok": { "type": "boolean" }, "version": { "type": ["string", "null"] }, "reason": { "type": ["string", "null"] } }
+        },
+        "selection": {
+          "type": "object", "additionalProperties": false,
+          "required": ["model", "effort", "maxTurns"],
+          "properties": { "model": { "type": "boolean" }, "effort": { "type": "boolean" }, "maxTurns": { "type": "boolean" } }
+        },
+        "grants": {
+          "type": "object", "additionalProperties": false,
+          "required": ["bash", "webSearch", "mcp", "write", "nestedSource"],
+          "properties": { "bash": { "type": "boolean" }, "webSearch": { "type": "boolean" }, "mcp": { "type": "boolean" }, "write": { "type": "boolean" }, "nestedSource": { "type": "boolean" } }
+        },
+        "isolation": {
+          "type": "object", "additionalProperties": false,
+          "required": ["nativeFilesystemIsolation", "nativeBashSandbox", "mutationGuarantee"],
+          "properties": {
+            "nativeFilesystemIsolation": { "type": "boolean" },
+            "nativeBashSandbox": { "type": "boolean" },
+            "mutationGuarantee": { "enum": ["native-and-final-state", "final-state-detection-only"] }
+          }
+        }
+      }
+    }
+  }
+}

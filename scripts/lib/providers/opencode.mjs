@@ -22,10 +22,10 @@ function agentName(role) {
   return writable(role) ? 'handoff_strict_writer_v03' : 'handoff_strict_reader_v03';
 }
 
-function permissions(role) {
+function permissions(role, { bash = false, webSearch = false } = {}) {
   const value = {
     '*': 'deny',
-    bash: 'deny',
+    bash: bash ? 'allow' : 'deny',
     edit: writable(role) ? 'allow' : 'deny',
     external_directory: 'deny',
     glob: 'allow',
@@ -35,34 +35,57 @@ function permissions(role) {
     read: 'allow',
     skill: 'deny',
     task: 'deny',
-    webfetch: 'deny',
-    websearch: 'deny',
+    webfetch: webSearch ? 'allow' : 'deny',
+    websearch: webSearch ? 'allow' : 'deny',
   };
   return value;
 }
 
-function inlineConfig(role) {
+function opencodeMcp(descriptor) {
+  const value = {};
+  for (const server of descriptor?.servers ?? []) {
+    if (server.transport === 'stdio') {
+      const environment = {};
+      for (const [target, reference] of Object.entries(server.env)) {
+        if (process.env[reference.fromEnv] === undefined) throw new Error(`MCP environment reference '${reference.fromEnv}' is unavailable`);
+        environment[target] = process.env[reference.fromEnv];
+      }
+      value[server.name] = { type: 'local', command: [server.command, ...server.args], environment, enabled: true };
+    } else {
+      const headers = {};
+      for (const [target, reference] of Object.entries(server.headers)) {
+        if (process.env[reference.fromEnv] === undefined) throw new Error(`MCP environment reference '${reference.fromEnv}' is unavailable`);
+        headers[target] = process.env[reference.fromEnv];
+      }
+      value[server.name] = { type: 'remote', url: server.url, headers, enabled: true };
+    }
+  }
+  return value;
+}
+
+function inlineConfig(role, controls = {}) {
   const name = agentName(role);
+  const permission = permissions(role, controls);
   return {
     autoupdate: false,
     share: 'disabled',
     snapshot: false,
     subagent_depth: 0,
     instructions: [],
-    mcp: {},
+    mcp: opencodeMcp(controls.mcpDescriptor),
     plugin: [],
-    permission: permissions(role),
+    permission,
     agent: {
       [name]: {
         description: 'Handoff strict machine agent',
         mode: 'primary',
-        permission: permissions(role),
+        permission,
       },
     },
   };
 }
 
-function isolatedEnvironment(role, root, { preserveAuth = true } = {}) {
+function isolatedEnvironment(role, root, { preserveAuth = true, ...controls } = {}) {
   const home = join(root, 'home');
   const config = join(root, 'config');
   const cache = join(root, 'cache');
@@ -76,8 +99,8 @@ function isolatedEnvironment(role, root, { preserveAuth = true } = {}) {
     XDG_STATE_HOME: state,
     XDG_DATA_HOME: data,
     OPENCODE_CONFIG_DIR: config,
-    OPENCODE_CONFIG_CONTENT: JSON.stringify(inlineConfig(role)),
-    OPENCODE_PERMISSION: JSON.stringify(permissions(role)),
+    OPENCODE_CONFIG_CONTENT: JSON.stringify(inlineConfig(role, controls)),
+    OPENCODE_PERMISSION: JSON.stringify(permissions(role, controls)),
     OPENCODE_PURE: '1',
     OPENCODE_DISABLE_PROJECT_CONFIG: '1',
     OPENCODE_DISABLE_DEFAULT_PLUGINS: '1',
@@ -164,7 +187,7 @@ export function pipelinePreflight(bin, { cwd = process.cwd(), role = null, roles
   return globalFlags;
 }
 
-export function pipelinePolicy(role) {
+export function pipelinePolicy(role, { bash = false, webSearch = false, mcpDescriptor = null } = {}) {
   const canWrite = writable(role);
   return {
     enforcement: 'preflighted-tool-permission-policy',
@@ -175,26 +198,27 @@ export function pipelinePolicy(role) {
     managedConfiguration: 'effective global and named-agent permissions plus extension shutdown verified before execution',
     projectRules: 'project configuration disabled; prompt carries the request contract',
     nativeFilesystemIsolation: false,
-    fileToolConfinement: canWrite ? 'OpenCode edit permission with external_directory denied' : 'edit and bash denied',
-    toolAllowlist: canWrite ? ['edit', 'glob', 'grep', 'read'] : ['glob', 'grep', 'read'],
-    webSearch: false,
+    fileToolConfinement: canWrite ? 'OpenCode edit permission with external_directory denied' : (bash ? 'permission-only Bash plus final-state mutation detection' : 'edit and bash denied'),
+    toolAllowlist: [...(canWrite ? ['edit', 'glob', 'grep', 'read'] : ['glob', 'grep', 'read']), ...(bash ? ['bash'] : []), ...(webSearch ? ['webfetch', 'websearch'] : []), ...(mcpDescriptor ? ['approved-mcp'] : [])],
+    webSearch,
     subagents: false,
     memory: false,
-    network: 'provider API only; web tools and bash denied',
+    network: webSearch ? 'provider API plus webfetch/websearch permission' : (bash ? 'provider API plus permission-controlled Bash child network' : 'provider API only; web tools and bash denied'),
     structuredResult: 'driver-normalized from strict raw JSON events',
     providerState: 'authentication and session data remain in the provider data directory',
   };
 }
 
-export function pipelineInvocation({ bin, role, cwd, tempRoot, model, effort }) {
-  const policy = pipelinePolicy(role);
+export function pipelineInvocation({ bin, role, cwd, tempRoot, model, effort, bash = false, webSearch = false, mcpDescriptor }) {
+  const controls = { bash, webSearch, mcpDescriptor };
+  const policy = pipelinePolicy(role, controls);
   const args = ['--pure', 'run', '--agent', agentName(role), '--dir', cwd, '--format', 'json'];
   if (model) args.push('--model', model);
   if (effort) args.push('--variant', effort);
   return {
     bin,
     args,
-    env: isolatedEnvironment(role, join(tempRoot, 'opencode')),
+    env: isolatedEnvironment(role, join(tempRoot, 'opencode'), { ...controls }),
     stdin: 'prompt',
     resultSource: { type: 'stdout' },
     policy,

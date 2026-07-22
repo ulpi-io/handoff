@@ -5,5 +5,5 @@ allowed-tools: [Bash, Read, Write, Grep, Glob]
 disable-model-invocation: true
 ---
 Use the **handoff-run** skill with provider `opencode`, role `build`, cwd `$(pwd)`, and request
-`$ARGUMENTS`. Use only the strict prepare-request + `handoff.mjs run` flow. The resolved named-agent
-policy must be preflighted; Bash, web, skills, subagents, and external-directory access stay denied.
+`$ARGUMENTS`. Use the exact root `handoff.mjs run --caller-harness claude --harness opencode --mode build` flow. The resolved named-agent
+policy and requested Bash, web, and MCP grants must be preflighted.

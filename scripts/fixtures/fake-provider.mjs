@@ -35,12 +35,12 @@ if (has('--help') || has('-h')) {
     process.exit(0);
   }
   const help = {
-    codex: '--config --strict-config --sandbox --cd --ephemeral --ignore-user-config --ignore-rules --output-schema --output-last-message',
+    codex: '--config --strict-config --sandbox --cd --ephemeral --ignore-user-config --ignore-rules --disable --output-schema --output-last-message',
     grok: '--allow --cwd --deny --disable-web-search --json-schema --max-turns --no-memory --no-plan --no-subagents --permission-mode --prompt-file --sandbox --tools --verbatim',
-    'kiro-cli': '--no-interactive --trust-tools --wrap',
+    'kiro-cli': '--effort --model --no-interactive --require-mcp-startup --trust-tools --wrap',
     claude: '--allowedTools --bare --disable-slash-commands --json-schema --mcp-config --no-chrome --no-session-persistence --output-format --permission-mode --safe-mode --settings --strict-mcp-config --tools',
     opencode: args.includes('run') ? '--agent --dir --format' : '--pure',
-    'cursor-agent': args.includes('sandbox') ? '--allow-paths --network --readonly-paths --sandbox' : '--force --output-format --print',
+    'cursor-agent': args.includes('sandbox') ? '--allow-paths --network --readonly-paths --sandbox' : '--approve-mcps --force --output-format --print',
   }[executable];
   process.stdout.write(`${help || ''}\n`);
   process.exit(0);
@@ -94,7 +94,8 @@ if (process.env.HANDOFF_FAKE_PROMPT_CAPTURE) {
   writeFileSync(process.env.HANDOFF_FAKE_PROMPT_CAPTURE, prompt);
 }
 
-const role = prompt.match(/machine role '([^']+)'/u)?.[1] || 'review';
+const v03 = prompt.includes('Handoff v0.3');
+const role = prompt.match(/machine role '([^']+)'/u)?.[1] || prompt.match(/in mode '([^']+)'/u)?.[1] || 'review';
 const cwd = after('--cd') || after('--cwd') || after('--dir') || after('-C') || process.cwd();
 const mode = process.env.HANDOFF_FAKE_MODE || 'success';
 let changedPath = null;
@@ -122,9 +123,9 @@ if (mode === 'hang') {
 }
 
 const output = {
-  schemaVersion: 'handoff.provider-output.v0.2',
+  schemaVersion: v03 ? 'handoff.provider-output.v0.3' : 'handoff.provider-output.v0.2',
   status: mode === 'exit' ? 'failed' : 'completed',
-  summary: mode === 'exit' ? 'fake provider failure' : `fake ${role} completed`,
+  [v03 ? 'response' : 'summary']: mode === 'exit' ? 'fake provider failure' : `fake ${role} completed`,
   evidence: changedPath ? [{ kind: 'file-change', path: changedPath, summary: 'fake changed a file' }] : [],
   findings: [],
   usage: { inputTokens: 11, outputTokens: 7, totalTokens: 18 },
@@ -132,7 +133,7 @@ const output = {
 
 let serialized = JSON.stringify(output);
 if (mode === 'prose') serialized = 'Everything looks good.';
-if (mode === 'oversized') serialized = JSON.stringify({ ...output, summary: 'x'.repeat(300_000) });
+if (mode === 'oversized') serialized = JSON.stringify({ ...output, [v03 ? 'response' : 'summary']: 'x'.repeat(300_000) });
 if (mode === 'schema-drift') serialized = JSON.stringify({ ...output, schemaVersion: 'handoff.provider-output.v9' });
 if (mode === 'unknown-field') serialized = JSON.stringify({ ...output, surprise: true });
 if (mode === 'unsafe-evidence-path') serialized = JSON.stringify({
@@ -235,8 +236,9 @@ const resultFile = after('--output-last-message');
 if (mode !== 'missing') {
   if (mode === 'invalid-utf8') {
     const valid = Buffer.from(serialized);
-    const summaryStart = valid.indexOf(Buffer.from('"summary":"')) + Buffer.byteLength('"summary":"');
-    const invalid = Buffer.concat([valid.subarray(0, summaryStart), Buffer.from([0xff]), valid.subarray(summaryStart + 1)]);
+    const outputKey = v03 ? 'response' : 'summary';
+    const outputStart = valid.indexOf(Buffer.from(`"${outputKey}":"`)) + Buffer.byteLength(`"${outputKey}":"`);
+    const invalid = Buffer.concat([valid.subarray(0, outputStart), Buffer.from([0xff]), valid.subarray(outputStart + 1)]);
     if (resultFile) writeFileSync(resultFile, invalid);
     else process.stdout.write(invalid);
   } else if (resultFile) writeFileSync(resultFile, mode === 'noisy' ? `provider noise\n${serialized}` : serialized);

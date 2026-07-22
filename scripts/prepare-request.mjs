@@ -2,25 +2,11 @@
 // Strict slash-command frontend: turn literal instruction-file bytes into the versioned request
 // consumed by handoff.mjs. For Codex, invoking this helper is the coordinator's explicit approval
 // to bind every applicable repository AGENTS.md rule into the request.
-import { randomUUID } from 'node:crypto';
-import { readFileSync, rmSync } from 'node:fs';
-
-import { codexApprovalSubjectHash, discoverCoordinatorAgentsRules } from './lib/agents-policy.mjs';
-import {
-  COORDINATOR_APPROVAL_SCHEMA_VERSION,
-  MAX_TURNS_PROVIDERS,
-  WEB_SEARCH_PROVIDERS,
-  PIPELINE_PROVIDER_ROLES,
-  REQUEST_SCHEMA_VERSION,
-  decodeUtf8,
-  parseMachineRequest,
-  sha256,
-} from './lib/contracts.mjs';
+import { rmSync } from 'node:fs';
+import { prepareLegacyRequest } from './lib/request-preparer.mjs';
 import {
   closeReservedResult,
   reserveResultPath,
-  safeCwd,
-  safeRequestPath,
   writeReservedResult,
 } from './lib/paths.mjs';
 
@@ -42,57 +28,30 @@ function parseArgs(argv) {
 }
 
 function prepare(options) {
-  const roles = PIPELINE_PROVIDER_ROLES[options.provider];
-  if (!roles) throw new Error(`--provider must be ${Object.keys(PIPELINE_PROVIDER_ROLES).join('|')}`);
-  if (!roles.includes(options.role)) {
-    throw new Error(`--provider ${options.provider} does not support role ${options.role}; allowed roles: ${roles.join('|')}`);
-  }
-  if (options.max_turns !== undefined && !MAX_TURNS_PROVIDERS.includes(options.provider)) {
-    throw new Error(`--max-turns is supported only for ${MAX_TURNS_PROVIDERS.join('|')}`);
-  }
-  if (options.web_search !== undefined && !WEB_SEARCH_PROVIDERS.includes(options.provider)) {
-    throw new Error(`--web-search is supported only for ${WEB_SEARCH_PROVIDERS.join('|')}`);
-  }
   if (options.web_search !== undefined && !['true', 'false'].includes(options.web_search)) {
     throw new Error('--web-search must be true|false');
   }
-  const cwd = safeCwd(options.cwd);
-  const instructionsPath = safeRequestPath(options.instructions);
   const reservation = reserveResultPath(options.request);
   try {
-    const request = {
-      schemaVersion: REQUEST_SCHEMA_VERSION,
-      instructions: decodeUtf8(readFileSync(instructionsPath), 'instructions file'),
-    };
-    if (options.timeout_ms !== undefined) request.timeoutMs = Number(options.timeout_ms);
-    if (options.max_turns !== undefined) request.maxTurns = Number(options.max_turns);
-    if (options.web_search !== undefined) request.webSearch = options.web_search === 'true';
-    if (options.model !== undefined) request.model = options.model;
-    if (options.effort !== undefined) request.effort = options.effort;
-    if (options.provider === 'codex') {
-      const approval = {
-        schemaVersion: COORDINATOR_APPROVAL_SCHEMA_VERSION,
-        approvalId: `handoff-command-${randomUUID()}`,
-        issuer: 'handoff-slash-command',
-        provider: 'codex',
-        role: options.role,
-        cwd,
-        scope: 'all-applicable-agents-rules',
-        rules: discoverCoordinatorAgentsRules(cwd),
-      };
-      approval.subjectHash = codexApprovalSubjectHash({ request, approval });
-      request.coordinatorApproval = approval;
-    }
-    const serialized = `${JSON.stringify(request)}\n`;
-    parseMachineRequest(Buffer.from(serialized));
-    writeReservedResult(reservation, serialized);
+    const prepared = prepareLegacyRequest({
+      provider: options.provider,
+      role: options.role,
+      cwd: options.cwd,
+      instructionsPath: options.instructions,
+      timeoutMs: options.timeout_ms === undefined ? undefined : Number(options.timeout_ms),
+      maxTurns: options.max_turns === undefined ? undefined : Number(options.max_turns),
+      webSearch: options.web_search === undefined ? undefined : options.web_search === 'true',
+      model: options.model,
+      effort: options.effort,
+    });
+    writeReservedResult(reservation, prepared.bytes);
     return {
       schemaVersion: 'handoff.prepared-request.v0.3',
       status: 'prepared',
       provider: options.provider,
       role: options.role,
       request: reservation.path,
-      requestHash: sha256(Buffer.from(serialized)),
+      requestHash: prepared.requestHash,
       coordinatorApproval: options.provider === 'codex' ? 'repository-rules-bound' : 'not-required',
     };
   } catch (error) {
