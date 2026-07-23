@@ -45,6 +45,63 @@ Handoff provides three deliberately separate workflows:
 The `with-advice` form does **not** let a worker delegate more work. Its only nested capability is
 read-only advice. Plain handoff gives the worker no nested Handoff capability at all.
 
+### Plain handoff
+
+Use plain handoff when one worker should complete the task independently. Build and phase workers
+may change the worktree and run validation; review and verify workers remain read-only. The worker
+cannot call Handoff again.
+
+```mermaid
+flowchart LR
+    caller["Caller<br/>Claude Code or Codex"]
+    driver["Handoff run<br/>bind request and grants"]
+    worker["Selected worker<br/>Codex, Grok, Kiro, Claude,<br/>OpenCode, or Cursor"]
+    work["Bounded task<br/>build/phase: write + validate<br/>review/verify: read-only"]
+    result["Verified result<br/>response, evidence, Git state"]
+    nested["Nested Handoff"]
+
+    caller -->|plain handoff| driver
+    driver -->|instructions + scoped authority| worker
+    worker --> work
+    work --> result
+    result --> driver
+    driver -->|normalized result| caller
+    worker -.->|not available| nested
+```
+
+### Handoff with advice
+
+Use handoff with advice when the worker should still own and complete the task but may consult
+another model. The supervisor gives the worker one additional capability: it may request bounded,
+read-only advice. The adviser cannot edit the worktree or take over the build.
+
+```mermaid
+flowchart LR
+    caller["Caller<br/>Claude Code or Codex"]
+    supervisor["Handoff run-with-advice<br/>supervisor + DAG budgets"]
+    worker["Selected worker<br/>owns the original task"]
+    work["Original task<br/>build/phase: write + validate<br/>review/verify: read-only"]
+    adviser["Selected adviser<br/>any supported harness/model"]
+    advice["Read-only advice<br/>no worktree writes or handoff"]
+    result["Verified root result<br/>task evidence + advice lineage"]
+
+    caller -->|handoff with advice| supervisor
+    supervisor -->|instructions + scoped task authority| worker
+    worker --> work
+    worker -.->|optional advice request| supervisor
+    supervisor -.->|attenuated read-only request| adviser
+    adviser -.-> advice
+    advice -.->|normalized advice| supervisor
+    supervisor -.->|return advice| worker
+    work --> result
+    result --> supervisor
+    supervisor -->|normalized result + terminal DAG| caller
+```
+
+An adviser may request further advice only while the supervisor's depth, node, concurrency, and
+time budgets allow it. Every node in that advice chain remains read-only. The original worker is
+the only delegated agent that owns the root task.
+
 ## Skills
 
 Claude Code and Codex receive the same 15 Handoff skills. The only difference is invocation syntax:
